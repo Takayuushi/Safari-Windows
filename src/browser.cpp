@@ -518,12 +518,13 @@ void Browser::paintTopChrome(Gdiplus::Graphics& g, int width) {
     }
 
     // Share Button
-    g.DrawRectangle(&dlPen, (int)m_btnShare.left + 8, (int)m_btnShare.top + 13, 14, 11);
-    g.DrawLine(&dlPen, (int)m_btnShare.left + 15, (int)m_btnShare.top + 7, (int)m_btnShare.left + 15, (int)m_btnShare.top + 16);
+    Gdiplus::Pen toolPen(colors::TextSecondary, 1.6f);
+    g.DrawRectangle(&toolPen, (int)m_btnShare.left + 8, (int)m_btnShare.top + 13, 14, 11);
+    g.DrawLine(&toolPen, (int)m_btnShare.left + 15, (int)m_btnShare.top + 7, (int)m_btnShare.left + 15, (int)m_btnShare.top + 16);
 
     // New Tab Toolbar (+)
-    g.DrawLine(&dlPen, (int)m_btnNewTabToolbar.left + 16, (int)m_btnNewTabToolbar.top + 10, (int)m_btnNewTabToolbar.left + 16, (int)m_btnNewTabToolbar.top + 22);
-    g.DrawLine(&dlPen, (int)m_btnNewTabToolbar.left + 10, (int)m_btnNewTabToolbar.top + 16, (int)m_btnNewTabToolbar.left + 22, (int)m_btnNewTabToolbar.top + 16);
+    g.DrawLine(&toolPen, (int)m_btnNewTabToolbar.left + 16, (int)m_btnNewTabToolbar.top + 10, (int)m_btnNewTabToolbar.left + 16, (int)m_btnNewTabToolbar.top + 22);
+    g.DrawLine(&toolPen, (int)m_btnNewTabToolbar.left + 10, (int)m_btnNewTabToolbar.top + 16, (int)m_btnNewTabToolbar.left + 22, (int)m_btnNewTabToolbar.top + 16);
 
     // Overview Button (Show All Tabs - Safari Two Overlapping Cards)
     Gdiplus::Pen ovPen(m_hoverOverview ? colors::TextPrimary : colors::TextSecondary, 1.4f);
