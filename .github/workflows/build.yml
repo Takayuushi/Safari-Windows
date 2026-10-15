@@ -15,40 +15,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
         with:
-          node-version: 20
+          dotnet-version: '10.0.x'
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
+      - name: Restore dependencies
+        run: dotnet restore SafariApp.csproj
 
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            src-tauri/target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^1.5" --locked
-
-      - name: Build Windows Executable
-        run: cargo tauri build --no-bundle
+      - name: Build and Publish Standalone Release
+        run: |
+          dotnet publish SafariApp.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish-output
 
       - name: Archive Safari Build
         run: |
-          mkdir dist-package
-          copy src-tauri\target\release\Safari.exe dist-package\
-          Compress-Archive -Path dist-package\* -DestinationPath Safari-Windows-x64.zip
+          Compress-Archive -Path publish-output\* -DestinationPath Safari-Windows-x64.zip
 
       - name: Upload Safari Windows x64 Artifact
         uses: actions/upload-artifact@v4
