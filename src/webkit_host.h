@@ -1,20 +1,11 @@
 #pragma once
 
 #include <windows.h>
+#include <WebKit/WKBase.h>
+#include <WebKit/WKBaseWin.h>
 #include <string>
 #include <functional>
 #include <memory>
-
-// Forward declarations of WebKit types
-typedef const struct OpaqueWKContext* WKContextRef;
-typedef const struct OpaqueWKPageGroup* WKPageGroupRef;
-typedef const struct OpaqueWKPreferences* WKPreferencesRef;
-typedef struct OpaqueWKPageConfiguration* WKPageConfigurationRef;
-typedef struct OpaqueWKView* WKViewRef;
-typedef const struct OpaqueWKPage* WKPageRef;
-typedef const struct OpaqueWKNavigation* WKNavigationRef;
-typedef const struct OpaqueWKError* WKErrorRef;
-typedef const void* WKTypeRef;
 
 namespace safari {
 

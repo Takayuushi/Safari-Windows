@@ -327,7 +327,7 @@ void Browser::paintTopChrome(Gdiplus::Graphics& g, int width) {
     g.FillRectangle(&chromeBrush, 0, 0, width, 86);
 
     Gdiplus::Pen borderPen(colors::ChromeBorder, 1.0f);
-    g.DrawLine(&borderPen, 0, 85, width, 85);
+    g.DrawLine(&borderPen, 0, 85, (int)width, 85);
 
     // Traffic Lights
     Gdiplus::SolidBrush closeBrush(colors::TrafficClose);
@@ -340,8 +340,8 @@ void Browser::paintTopChrome(Gdiplus::Graphics& g, int width) {
 
     // Sidebar Toggle Icon
     Gdiplus::Pen iconPen(colors::TextSecondary, 1.5f);
-    g.DrawRectangle(&iconPen, m_btnSidebarToggle.left + 7, m_btnSidebarToggle.top + 8, 18, 14);
-    g.DrawLine(&iconPen, m_btnSidebarToggle.left + 13, m_btnSidebarToggle.top + 8, m_btnSidebarToggle.left + 13, m_btnSidebarToggle.top + 22);
+    g.DrawRectangle(&iconPen, (int)m_btnSidebarToggle.left + 7, (int)m_btnSidebarToggle.top + 8, 18, 14);
+    g.DrawLine(&iconPen, (int)m_btnSidebarToggle.left + 13, (int)m_btnSidebarToggle.top + 8, (int)m_btnSidebarToggle.left + 13, (int)m_btnSidebarToggle.top + 22);
 
     // Back / Forward Capsule
     Gdiplus::SolidBrush navBg(colors::AddressBg);
@@ -389,7 +389,7 @@ void Browser::paintTopChrome(Gdiplus::Graphics& g, int width) {
 
     // Reload Icon
     Gdiplus::Pen reloadPen(m_hoverReload ? colors::TextPrimary : colors::TextSecondary, 1.6f);
-    g.DrawArc(&reloadPen, m_btnReload.left + 6.0f, m_btnReload.top + 6.0f, 13.0f, 13.0f, 45.0f, 270.0f);
+    g.DrawArc(&reloadPen, (float)m_btnReload.left + 6.0f, (float)m_btnReload.top + 6.0f, 13.0f, 13.0f, 45.0f, 270.0f);
 
     // Loading Progress Bar
     if (m_activeTab < m_tabs.size() && m_tabs[m_activeTab].isLoading) {
@@ -400,8 +400,8 @@ void Browser::paintTopChrome(Gdiplus::Graphics& g, int width) {
     // Right Action Buttons
     // Downloads Button
     Gdiplus::Pen dlPen(colors::TextSecondary, 1.6f);
-    g.DrawEllipse(&dlPen, m_btnDownloads.left + 6, m_btnDownloads.top + 6, 18, 18);
-    g.DrawLine(&dlPen, m_btnDownloads.left + 15, m_btnDownloads.top + 10, m_btnDownloads.left + 15, m_btnDownloads.top + 18);
+    g.DrawEllipse(&dlPen, (int)m_btnDownloads.left + 6, (int)m_btnDownloads.top + 6, 18, 18);
+    g.DrawLine(&dlPen, (int)m_btnDownloads.left + 15, (int)m_btnDownloads.top + 10, (int)m_btnDownloads.left + 15, (int)m_btnDownloads.top + 18);
     Gdiplus::PointF arrowPts[3] = {
         { (float)m_btnDownloads.left + 11.0f, (float)m_btnDownloads.top + 15.0f },
         { (float)m_btnDownloads.left + 15.0f, (float)m_btnDownloads.top + 19.0f },
@@ -411,19 +411,19 @@ void Browser::paintTopChrome(Gdiplus::Graphics& g, int width) {
 
     if (DownloadsManager::instance().hasActiveDownloads()) {
         Gdiplus::SolidBrush badgeBrush(colors::AccentBlue);
-        g.FillEllipse(&badgeBrush, m_btnDownloads.right - 10, m_btnDownloads.top + 4, 6, 6);
+        g.FillEllipse(&badgeBrush, (int)m_btnDownloads.right - 10, (int)m_btnDownloads.top + 4, 6, 6);
     }
 
     // Share Button
-    g.DrawRectangle(&dlPen, m_btnShare.left + 8, m_btnShare.top + 13, 14, 11);
-    g.DrawLine(&dlPen, m_btnShare.left + 15, m_btnShare.top + 7, m_btnShare.left + 15, m_btnShare.top + 16);
+    g.DrawRectangle(&dlPen, (int)m_btnShare.left + 8, (int)m_btnShare.top + 13, 14, 11);
+    g.DrawLine(&dlPen, (int)m_btnShare.left + 15, (int)m_btnShare.top + 7, (int)m_btnShare.left + 15, (int)m_btnShare.top + 16);
 
     // New Tab Toolbar (+)
-    g.DrawLine(&dlPen, m_btnNewTabToolbar.left + 16, m_btnNewTabToolbar.top + 10, m_btnNewTabToolbar.left + 16, m_btnNewTabToolbar.top + 22);
-    g.DrawLine(&dlPen, m_btnNewTabToolbar.left + 10, m_btnNewTabToolbar.top + 16, m_btnNewTabToolbar.left + 22, m_btnNewTabToolbar.top + 16);
+    g.DrawLine(&dlPen, (int)m_btnNewTabToolbar.left + 16, (int)m_btnNewTabToolbar.top + 10, (int)m_btnNewTabToolbar.left + 16, (int)m_btnNewTabToolbar.top + 22);
+    g.DrawLine(&dlPen, (int)m_btnNewTabToolbar.left + 10, (int)m_btnNewTabToolbar.top + 16, (int)m_btnNewTabToolbar.left + 22, (int)m_btnNewTabToolbar.top + 16);
 
     // Overview Button (Grid)
-    g.DrawRectangle(&dlPen, m_btnOverview.left + 8, m_btnOverview.top + 8, 14, 14);
+    g.DrawRectangle(&dlPen, (int)m_btnOverview.left + 8, (int)m_btnOverview.top + 8, 14, 14);
 }
 
 void Browser::paintTabBar(Gdiplus::Graphics& g) {
@@ -449,7 +449,7 @@ void Browser::paintTabBar(Gdiplus::Graphics& g) {
         } else {
             // Divider on right of inactive tab
             Gdiplus::Pen divPen(colors::ChromeBorder, 1.0f);
-            g.DrawLine(&divPen, tr.right + 2, tr.top + 6, tr.right + 2, tr.bottom - 6);
+            g.DrawLine(&divPen, (int)tr.right + 2, (int)tr.top + 6, (int)tr.right + 2, (int)tr.bottom - 6);
         }
 
         // Letter Favicon squircle
@@ -475,7 +475,7 @@ void Browser::paintTabBar(Gdiplus::Graphics& g) {
         // Close Button (×)
         if (m_hoverTabClose == (int)i) {
             Gdiplus::SolidBrush closeCircle(Gdiplus::Color(255, 72, 72, 80));
-            g.FillEllipse(&closeCircle, m_tabCloseRects[i].left, m_tabCloseRects[i].top, 14, 14);
+            g.FillEllipse(&closeCircle, (int)m_tabCloseRects[i].left, (int)m_tabCloseRects[i].top, 14, 14);
         }
         Gdiplus::Font closeFont(L"Segoe UI", 9.0f, Gdiplus::FontStyleRegular);
         g.DrawString(L"×", -1, &closeFont, Gdiplus::PointF((float)m_tabCloseRects[i].left + 2.0f, (float)m_tabCloseRects[i].top - 2.0f), &textMuted);
@@ -484,8 +484,8 @@ void Browser::paintTabBar(Gdiplus::Graphics& g) {
     // Plus (+) button in tab bar
     if (m_tabs.size() > 0) {
         Gdiplus::Pen plusPen(colors::TextSecondary, 1.6f);
-        g.DrawLine(&plusPen, m_btnNewTabInBar.left + 14, m_btnNewTabInBar.top + 8, m_btnNewTabInBar.left + 14, m_btnNewTabInBar.top + 20);
-        g.DrawLine(&plusPen, m_btnNewTabInBar.left + 8, m_btnNewTabInBar.top + 14, m_btnNewTabInBar.left + 20, m_btnNewTabInBar.top + 14);
+        g.DrawLine(&plusPen, (int)m_btnNewTabInBar.left + 14, (int)m_btnNewTabInBar.top + 8, (int)m_btnNewTabInBar.left + 14, (int)m_btnNewTabInBar.top + 20);
+        g.DrawLine(&plusPen, (int)m_btnNewTabInBar.left + 8, (int)m_btnNewTabInBar.top + 14, (int)m_btnNewTabInBar.left + 20, (int)m_btnNewTabInBar.top + 14);
     }
 }
 
@@ -494,7 +494,7 @@ void Browser::paintSidebar(Gdiplus::Graphics& g, int height) {
     g.FillRectangle(&sideBg, 0, 86, 260, height - 86);
 
     Gdiplus::Pen border(colors::SidebarBorder, 1.0f);
-    g.DrawLine(&border, 259, 86, 259, height);
+    g.DrawLine(&border, 259, 86, 259, (int)height);
 
     // Segment Switcher (Bookmarks / Reading List / History)
     Gdiplus::SolidBrush segBg(colors::SidebarSegment);

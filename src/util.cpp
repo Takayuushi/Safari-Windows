@@ -2,6 +2,7 @@
 #include <unknwn.h>
 #include <gdiplus.h>
 #include <shlobj.h>
+#include <shellapi.h>
 #include <algorithm>
 
 #pragma comment(lib, "gdiplus.lib")

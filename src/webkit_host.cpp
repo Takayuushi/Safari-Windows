@@ -8,7 +8,6 @@
 #include <WebKit/WKPreferencesRef.h>
 #include <WebKit/WKURL.h>
 #include <WebKit/WKString.h>
-#include <WebKit/WKNavigationDelegate.h>
 #include <WebKit/WKErrorRef.h>
 
 namespace safari {
