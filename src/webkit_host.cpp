@@ -42,6 +42,26 @@ WebKitHost& WebKitHost::instance() {
     return s_host;
 }
 
+static void configurePreferences(WKPreferencesRef prefs) {
+    if (!prefs) return;
+    WKPreferencesSetDeveloperExtrasEnabled(prefs, true);
+    WKPreferencesSetJavaScriptEnabled(prefs, true);
+    WKPreferencesSetWebAudioEnabled(prefs, true);
+    WKPreferencesSetMediaCapabilitiesEnabled(prefs, true);
+    WKPreferencesSetAllowMediaContentTypesRequiringHardwareSupportAsFallback(prefs, true);
+
+    // Media Source Extensions (MSE) & Video Playback configuration for YouTube / HTML5 streaming
+    WKPreferencesSetMediaSourceEnabled(prefs, true);
+    WKPreferencesSetMediaPlaybackAllowsInline(prefs, true);
+    WKPreferencesSetInlineMediaPlaybackRequiresPlaysInlineAttribute(prefs, false);
+    WKPreferencesSetMediaPlaybackRequiresUserGesture(prefs, false);
+    WKPreferencesSetVideoPlaybackRequiresUserGesture(prefs, false);
+    WKPreferencesSetAudioPlaybackRequiresUserGesture(prefs, false);
+    WKPreferencesSetAllowsPictureInPictureMediaPlayback(prefs, true);
+    WKPreferencesSetMediaPreloadingEnabled(prefs, true);
+    WKPreferencesSetInvisibleMediaAutoplayPermitted(prefs, true);
+}
+
 bool WebKitHost::initialize() {
     if (m_initialized) return true;
 
@@ -53,24 +73,7 @@ bool WebKitHost::initialize() {
     WKRelease(groupName);
 
     m_preferences = WKPageGroupGetPreferences(m_pageGroup);
-    if (m_preferences) {
-        WKPreferencesSetDeveloperExtrasEnabled(m_preferences, true);
-        WKPreferencesSetJavaScriptEnabled(m_preferences, true);
-        WKPreferencesSetWebAudioEnabled(m_preferences, true);
-        WKPreferencesSetMediaCapabilitiesEnabled(m_preferences, true);
-        WKPreferencesSetAllowMediaContentTypesRequiringHardwareSupportAsFallback(m_preferences, true);
-
-        // Media Source Extensions (MSE) & Video Playback configuration for YouTube / HTML5 streaming
-        WKPreferencesSetMediaSourceEnabled(m_preferences, true);
-        WKPreferencesSetMediaPlaybackAllowsInline(m_preferences, true);
-        WKPreferencesSetInlineMediaPlaybackRequiresPlaysInlineAttribute(m_preferences, false);
-        WKPreferencesSetMediaPlaybackRequiresUserGesture(m_preferences, false);
-        WKPreferencesSetVideoPlaybackRequiresUserGesture(m_preferences, false);
-        WKPreferencesSetAudioPlaybackRequiresUserGesture(m_preferences, false);
-        WKPreferencesSetAllowsPictureInPictureMediaPlayback(m_preferences, true);
-        WKPreferencesSetMediaPreloadingEnabled(m_preferences, true);
-        WKPreferencesSetInvisibleMediaAutoplayPermitted(m_preferences, true);
-    }
+    configurePreferences(m_preferences);
 
     // Set up Download Client to save files to Downloads folder
     WKContextDownloadClientV0 dlClient = {};
@@ -150,7 +153,10 @@ bool WebView::create(HWND parent, const RECT& bounds) {
     WKPageConfigurationSetContext(pageConfig, host.context());
     WKPageConfigurationSetPageGroup(pageConfig, host.pageGroup());
 
-    // Inject MSE compatibility shim so YouTube selects standard H.264 (avc1) / AAC (mp4a) Media Foundation streams
+    // Apply media & autoplay preferences directly to pageConfig
+    configurePreferences(WKPageConfigurationGetPreferences(pageConfig));
+
+    // Inject h264ify & media compatibility shim so YouTube selects hardware-accelerated H.264 (avc1) / AAC (mp4a) Media Foundation streams
     WKUserContentControllerRef userContent = WKPageConfigurationGetUserContentController(pageConfig);
     bool createdUserContent = false;
     if (!userContent) {
@@ -162,7 +168,7 @@ bool WebView::create(HWND parent, const RECT& bounds) {
     const char* shimJs = R"js(
 (function() {
   try {
-    // Fullscreen API polyfill
+    // 1. Fullscreen API polyfill
     try {
       Object.defineProperty(document, 'fullscreenEnabled', { get: function() { return true; }, configurable: true });
       Object.defineProperty(document, 'webkitFullscreenEnabled', { get: function() { return true; }, configurable: true });
@@ -174,83 +180,88 @@ bool WebView::create(HWND parent, const RECT& bounds) {
       }
     } catch(fe) {}
 
-    // HTML5 Media compatibility shim
+    // 2. h264ify: Force YouTube & HTML5 players to select hardware-accelerated H.264 (avc1) / AAC (mp4a)
+    // Block VP8, VP9, WebM, and AV1 so YouTube never requests non-H.264 streams
+    if (window.MediaSource && typeof window.MediaSource.isTypeSupported === 'function') {
+      var origIsTypeSupported = window.MediaSource.isTypeSupported.bind(window.MediaSource);
+      window.MediaSource.isTypeSupported = function(type) {
+        if (!type) return false;
+        var l = type.toLowerCase();
+        if (l.indexOf('webm') !== -1 || l.indexOf('vp8') !== -1 || l.indexOf('vp9') !== -1 || l.indexOf('av01') !== -1 || l.indexOf('av1') !== -1) {
+          return false;
+        }
+        if (l.indexOf('mp4') !== -1 || l.indexOf('avc1') !== -1 || l.indexOf('mp4a') !== -1) {
+          return true;
+        }
+        return origIsTypeSupported(type);
+      };
+    }
+
     if (window.HTMLMediaElement && window.HTMLMediaElement.prototype.canPlayType) {
       var origCanPlay = window.HTMLMediaElement.prototype.canPlayType;
       window.HTMLMediaElement.prototype.canPlayType = function(type) {
         if (!type) return '';
         var l = type.toLowerCase();
-        if (l.indexOf('avc1') !== -1 || l.indexOf('mp4a') !== -1 ||
-            l.indexOf('video/mp4') !== -1 || l.indexOf('audio/mp4') !== -1 ||
-            l.indexOf('mpegurl') !== -1 || l.indexOf('m3u8') !== -1) {
+        if (l.indexOf('webm') !== -1 || l.indexOf('vp8') !== -1 || l.indexOf('vp9') !== -1 || l.indexOf('av01') !== -1 || l.indexOf('av1') !== -1) {
+          return '';
+        }
+        if (l.indexOf('avc1') !== -1 || l.indexOf('mp4a') !== -1 || l.indexOf('video/mp4') !== -1 || l.indexOf('audio/mp4') !== -1) {
           return 'probably';
         }
         return origCanPlay.call(this, type);
       };
     }
 
-    // YouTube Watch Player Integration
-    if (window.location && window.location.hostname && window.location.hostname.indexOf('youtube.com') !== -1) {
-      var activeConnectedVid = null;
-
-      function checkWatchPage() {
-        var isWatch = window.location.pathname === '/watch';
-        if (!isWatch) {
-          var oldP = document.getElementById('chronos-yt-embed');
-          if (oldP) oldP.remove();
-          var oldNative = document.getElementById('chronos-native-video');
-          if (oldNative) oldNative.remove();
-          var mp = document.getElementById('movie_player');
-          if (mp) mp.style.display = '';
-          activeConnectedVid = null;
-          return;
+    if (navigator.mediaCapabilities && typeof navigator.mediaCapabilities.decodingInfo === 'function') {
+      var origDecodingInfo = navigator.mediaCapabilities.decodingInfo.bind(navigator.mediaCapabilities);
+      navigator.mediaCapabilities.decodingInfo = function(config) {
+        if (config && config.video && config.video.contentType) {
+          var ct = config.video.contentType.toLowerCase();
+          if (ct.indexOf('webm') !== -1 || ct.indexOf('vp8') !== -1 || ct.indexOf('vp9') !== -1 || ct.indexOf('av01') !== -1 || ct.indexOf('av1') !== -1) {
+            return Promise.resolve({ supported: false, smooth: false, powerEfficient: false });
+          }
+          if (ct.indexOf('avc1') !== -1 || ct.indexOf('mp4') !== -1) {
+            return Promise.resolve({ supported: true, smooth: true, powerEfficient: true });
+          }
         }
+        return origDecodingInfo(config);
+      };
+    }
 
-        var match = window.location.search.match(/[?&]v=([^&]+)/);
-        if (!match) return;
-        var vid = match[1];
-
-        // Also clean up any legacy native video tag
+    // 3. YouTube native player watchdog & unblocker
+    if (window.location && window.location.hostname && window.location.hostname.indexOf('youtube.com') !== -1) {
+      function cleanLegacy() {
+        var oldP = document.getElementById('chronos-yt-embed');
+        if (oldP) oldP.remove();
         var oldNative = document.getElementById('chronos-native-video');
         if (oldNative) oldNative.remove();
-
         var mp = document.getElementById('movie_player');
-        var parent = (mp && mp.parentElement) ? mp.parentElement :
-                     (document.getElementById('player-container') ||
-                      document.getElementById('player') ||
-                      document.querySelector('ytd-player'));
-        if (!parent) return;
-
-        if (vid === activeConnectedVid && document.getElementById('chronos-yt-embed')) return;
-        activeConnectedVid = vid;
-
-        if (mp) {
-          try {
-            if (typeof mp.stopVideo === 'function') mp.stopVideo();
-            else if (typeof mp.pauseVideo === 'function') mp.pauseVideo();
-          } catch(e) {}
-          mp.style.setProperty('display', 'none', 'important');
-        }
-
-        var embed = document.getElementById('chronos-yt-embed');
-        if (!embed) {
-          embed = document.createElement('iframe');
-          embed.id = 'chronos-yt-embed';
-          embed.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
-          embed.setAttribute('allowfullscreen', 'true');
-          embed.style.cssText = 'width:100%;height:100%;min-height:480px;aspect-ratio:16/9;border:none;border-radius:12px;background:#000;display:block;position:relative;z-index:9999;';
-          parent.insertBefore(embed, parent.firstChild);
-        }
-        var targetSrc = 'https://www.youtube.com/embed/' + vid + '?autoplay=1&enablejsapi=1&rel=0&modestbranding=1&playsinline=1';
-        if (embed.getAttribute('src') !== targetSrc) {
-          embed.src = targetSrc;
+        if (mp && mp.style.display === 'none') {
+          mp.style.display = '';
         }
       }
 
-      window.addEventListener('yt-navigate-finish', checkWatchPage);
-      window.addEventListener('popstate', checkWatchPage);
-      document.addEventListener('DOMContentLoaded', checkWatchPage);
-      setInterval(checkWatchPage, 800);
+      function autoSkipAds() {
+        cleanLegacy();
+        var skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button');
+        if (skipBtn) {
+          skipBtn.click();
+          return;
+        }
+        var adShowing = document.querySelector('.ad-showing, .ad-interrupting');
+        if (adShowing) {
+          var v = document.querySelector('#movie_player video, video.html5-main-video');
+          if (v && isFinite(v.duration) && v.duration > 0 && v.currentTime < v.duration) {
+            v.currentTime = v.duration;
+          }
+          var closeBtn = document.querySelector('.ytp-ad-overlay-close-button');
+          if (closeBtn) closeBtn.click();
+        }
+      }
+
+      setInterval(autoSkipAds, 350);
+      window.addEventListener('DOMContentLoaded', cleanLegacy);
+      window.addEventListener('yt-navigate-finish', cleanLegacy);
     }
   } catch(e) {}
 })();
@@ -273,9 +284,10 @@ bool WebView::create(HWND parent, const RECT& bounds) {
 
     m_page = WKViewGetPage(m_view);
 
-    // Desktop Safari User-Agent so YouTube and web services deliver native Safari H.264 streams
+    // Modern Windows Desktop User-Agent with Safari/WebKit signature
+    // Instructs YouTube to deliver its primary Windows HTML5 player instead of macOS-exclusive FairPlay/AVFoundation code paths
     WKStringRef ua = WKStringCreateWithUTF8CString(
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     );
     WKPageSetCustomUserAgent(m_page, ua);
     WKRelease(ua);
