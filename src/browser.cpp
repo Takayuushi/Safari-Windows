@@ -122,6 +122,16 @@ int Browser::findTabIndex(const WebView* view) const {
     return -1;
 }
 
+std::wstring Browser::getDefaultTabUrl() const {
+    if (m_settings.newTabSetting == L"Homepage") {
+        return m_settings.homepage.empty() ? L"chronos:start" : m_settings.homepage;
+    }
+    if (m_settings.newTabSetting == L"Empty Page") {
+        return L"about:blank";
+    }
+    return L"chronos:start";
+}
+
 void Browser::createTab(const std::wstring& url) {
     auto tab = Tab{};
     tab.url = url;
@@ -138,6 +148,9 @@ void Browser::createTab(const std::wstring& url) {
 
     RECT webBounds{ 0, 86, 1200, 800 };
     tab.webView->create(m_hwnd, webBounds);
+    if (m_settings.pageZoom != 1.0) {
+        tab.webView->setPageZoom(m_settings.pageZoom);
+    }
 
     size_t newIndex = m_tabs.size();
     auto* viewPtr = tab.webView.get();
@@ -204,7 +217,7 @@ void Browser::createTab(const std::wstring& url) {
     if (url == L"chronos:start" || url == L"safari:start") {
         viewPtr->loadHtml(getStartPageHtml(), "chronos:start");
     } else if (url == L"chronos:settings" || url == L"safari:settings") {
-        viewPtr->loadHtml(getSettingsPageHtml(), "chronos:settings");
+        viewPtr->loadHtml(getSettingsPageHtml(m_settings), "chronos:settings");
     } else if (url == L"chronos:downloads" || url == L"safari:downloads") {
         viewPtr->loadHtml(getDownloadsPageHtml(), "chronos:downloads");
     } else {
@@ -338,6 +351,57 @@ void Browser::handleInternalUrl(size_t tabIdx, const std::wstring& target) {
         m_tabs[tabIdx].webView->loadHtml(getDownloadsPageHtml(), "chronos:downloads");
         return;
     }
+    if (target.starts_with(L"chronos:setting?") || target.starts_with(L"safari:setting?")) {
+        size_t qPos = target.find(L'?');
+        std::wstring query = target.substr(qPos + 1);
+        size_t hashPos = query.find(L'#');
+        std::wstring hashPart = (hashPos != std::wstring::npos) ? query.substr(hashPos) : L"";
+        if (hashPos != std::wstring::npos) query = query.substr(0, hashPos);
+
+        std::wstring key, val;
+        size_t kPos = query.find(L"key=");
+        size_t vPos = query.find(L"&val=");
+        if (kPos != std::wstring::npos && vPos != std::wstring::npos) {
+            key = query.substr(kPos + 4, vPos - (kPos + 4));
+            val = query.substr(vPos + 5);
+        }
+
+        if (key == L"showFullUrl") {
+            m_settings.showFullUrl = (val == L"true");
+            InvalidateRect(m_hwnd, &m_addressBarRect, FALSE);
+        } else if (key == L"searchEngine") {
+            m_settings.searchEngine = val;
+        } else if (key == L"newTab") {
+            m_settings.newTabSetting = val;
+        } else if (key == L"homepage") {
+            m_settings.homepage = val;
+        } else if (key == L"pageZoom") {
+            double factor = wcstod(val.c_str(), nullptr);
+            if (factor >= 0.25 && factor <= 5.0) {
+                m_settings.pageZoom = factor;
+                for (auto& tab : m_tabs) {
+                    if (tab.webView) tab.webView->setPageZoom(m_settings.pageZoom);
+                }
+            }
+        } else if (key == L"devTools") {
+            m_settings.devToolsEnabled = (val == L"true");
+        }
+
+        std::string baseUrl = "chronos:settings" + toUtf8(hashPart);
+        m_tabs[tabIdx].webView->loadHtml(getSettingsPageHtml(m_settings), baseUrl);
+        return;
+    }
+    if (target == L"chronos:open_downloads_folder" || target == L"safari:open_downloads_folder") {
+        revealFileInExplorer(getDownloadsFolder());
+        return;
+    }
+    if (target == L"chronos:clear_all_data" || target == L"safari:clear_all_data") {
+        m_history.clear();
+        DownloadsManager::instance().clearCompleted();
+        m_tabs[tabIdx].webView->loadHtml(getSettingsPageHtml(m_settings), "chronos:settings#privacy");
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+        return;
+    }
     if (target == L"chronos:start" || target == L"safari:start") {
         if (m_tabs[tabIdx].url == target && m_tabs[tabIdx].title == L"Start Page") return;
         m_tabs[tabIdx].title = L"Start Page";
@@ -349,7 +413,7 @@ void Browser::handleInternalUrl(size_t tabIdx, const std::wstring& target) {
         if (m_tabs[tabIdx].url == target && m_tabs[tabIdx].title == L"Settings") return;
         m_tabs[tabIdx].title = L"Settings";
         m_tabs[tabIdx].url = target;
-        m_tabs[tabIdx].webView->loadHtml(getSettingsPageHtml(), "chronos:settings");
+        m_tabs[tabIdx].webView->loadHtml(getSettingsPageHtml(m_settings), "chronos:settings");
         return;
     }
     if (target == L"chronos:downloads" || target == L"safari:downloads") {
@@ -362,7 +426,7 @@ void Browser::handleInternalUrl(size_t tabIdx, const std::wstring& target) {
 }
 
 void Browser::navigate(const std::wstring& input) {
-    std::wstring target = normalizeInput(input);
+    std::wstring target = normalizeInput(input, m_settings.searchEngine);
     if (m_activeTab < m_tabs.size() && m_tabs[m_activeTab].webView) {
         if (target.starts_with(L"chronos:") || target.starts_with(L"safari:")) {
             handleInternalUrl(m_activeTab, target);
@@ -461,6 +525,7 @@ void Browser::updateLayout() {
     int addrWidth = std::clamp(width - 480, 360, 640);
     int addrLeft = (width - addrWidth) / 2;
     m_addressBarRect = RECT{ addrLeft, 9, addrLeft + addrWidth, 43 };
+    m_btnFormat = RECT{ m_addressBarRect.left + 4, 11, m_addressBarRect.left + 32, 39 };
     m_btnReload = RECT{ m_addressBarRect.right - 32, 11, m_addressBarRect.right - 4, 39 };
 
     // Right Action Buttons
@@ -604,25 +669,49 @@ void Browser::paintTopChrome(Gdiplus::Graphics& g, int width) {
     Gdiplus::Pen addrBorder(colors::AddressBorder, 1.0f);
     drawRoundedRect(g, addrBorder, addrRectF, 8.0f);
 
-    // aA Format Icon
-    Gdiplus::Font fontSmall(L"Segoe UI Variable Text", 9.0f, Gdiplus::FontStyleBold);
-    Gdiplus::SolidBrush textMuted(colors::TextMuted);
-    g.DrawString(L"aA", -1, &fontSmall, Gdiplus::PointF(addrRectF.X + 10.0f, addrRectF.Y + 8.0f), &textMuted);
+    // aA Format Button
+    if (m_hoverFormat) {
+        Gdiplus::SolidBrush hoverFmt(Gdiplus::Color(255, 54, 54, 60));
+        fillRoundedRect(g, hoverFmt, Gdiplus::RectF((float)m_btnFormat.left, (float)m_btnFormat.top, (float)(m_btnFormat.right - m_btnFormat.left), (float)(m_btnFormat.bottom - m_btnFormat.top)), 5.0f);
+    }
+    Gdiplus::Font fontSmall(L"Segoe UI Variable Text", 9.5f, Gdiplus::FontStyleBold);
+    Gdiplus::SolidBrush textFormat(m_hoverFormat ? colors::TextPrimary : colors::TextSecondary);
+    Gdiplus::StringFormat fmtCenter;
+    fmtCenter.SetAlignment(Gdiplus::StringAlignmentCenter);
+    fmtCenter.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+    g.DrawString(L"aA", -1, &fontSmall, Gdiplus::RectF((float)m_btnFormat.left, (float)m_btnFormat.top, (float)(m_btnFormat.right - m_btnFormat.left), (float)(m_btnFormat.bottom - m_btnFormat.top)), &fmtCenter, &textFormat);
 
     // Padlock Icon
     Gdiplus::Pen lockPen(colors::TextMuted, 1.4f);
-    g.DrawRectangle(&lockPen, addrRectF.X + 32.0f, addrRectF.Y + 13.0f, 8.0f, 7.0f);
-    g.DrawArc(&lockPen, addrRectF.X + 33.0f, addrRectF.Y + 9.0f, 6.0f, 6.0f, 180.0f, 180.0f);
+    g.DrawRectangle(&lockPen, (float)m_btnFormat.right + 4.0f, addrRectF.Y + 13.0f, 8.0f, 7.0f);
+    g.DrawArc(&lockPen, (float)m_btnFormat.right + 5.0f, addrRectF.Y + 9.0f, 6.0f, 6.0f, 180.0f, 180.0f);
 
-    // Domain Text
-    std::wstring displayHost = (m_activeTab < m_tabs.size()) ? extractDomain(m_tabs[m_activeTab].url) : L"Start Page";
+    // Domain or Full URL Text
+    std::wstring displayHost;
+    if (m_activeTab < m_tabs.size()) {
+        if (m_settings.showFullUrl) {
+            displayHost = m_tabs[m_activeTab].url;
+        } else {
+            displayHost = extractDomain(m_tabs[m_activeTab].url);
+        }
+    } else {
+        displayHost = L"Start Page";
+    }
     Gdiplus::Font fontDomain(L"Segoe UI Variable Text", 10.0f, Gdiplus::FontStyleRegular);
     Gdiplus::SolidBrush textPrimary(colors::TextPrimary);
 
     Gdiplus::StringFormat format;
     format.SetAlignment(Gdiplus::StringAlignmentCenter);
     format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-    g.DrawString(displayHost.c_str(), -1, &fontDomain, addrRectF, &format, &textPrimary);
+    format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+    format.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
+    Gdiplus::RectF textBoundF(
+        (float)m_btnFormat.right + 18.0f,
+        addrRectF.Y,
+        (float)(m_btnReload.left - (m_btnFormat.right + 18.0f)),
+        addrRectF.Height
+    );
+    g.DrawString(displayHost.c_str(), -1, &fontDomain, textBoundF, &format, &textPrimary);
 
     // Reload Icon
     Gdiplus::Pen reloadPen(m_hoverReload ? colors::TextPrimary : colors::TextSecondary, 1.6f);
@@ -1159,6 +1248,7 @@ void Browser::onMouseMove(POINT pt) {
     m_hoverSidebar = PtInRect(&m_btnSidebarToggle, pt);
     m_hoverBack = PtInRect(&m_btnNavBack, pt);
     m_hoverForward = PtInRect(&m_btnNavForward, pt);
+    m_hoverFormat = PtInRect(&m_btnFormat, pt);
     m_hoverReload = PtInRect(&m_btnReload, pt);
     m_hoverDownloads = PtInRect(&m_btnDownloads, pt);
     m_hoverShare = PtInRect(&m_btnShare, pt);
@@ -1226,6 +1316,53 @@ void Browser::onMouseDown(POINT pt) {
     if (PtInRect(&m_btnReload, pt)) {
         if (m_activeTab < m_tabs.size() && m_tabs[m_activeTab].webView) {
             m_tabs[m_activeTab].webView->reload();
+        }
+        return;
+    }
+
+    // aA Format Menu
+    if (PtInRect(&m_btnFormat, pt)) {
+        HMENU hMenu = CreatePopupMenu();
+        int zoomPercent = (int)std::round(m_settings.pageZoom * 100.0);
+        wchar_t zoomLabel[64];
+        swprintf_s(zoomLabel, L"Zoom Level: %d%%", zoomPercent);
+
+        AppendMenuW(hMenu, MF_STRING | MF_GRAYED, 0, zoomLabel);
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(hMenu, MF_STRING, 101, L"Zoom In (+15%)");
+        AppendMenuW(hMenu, MF_STRING, 102, L"Actual Size (100%)");
+        AppendMenuW(hMenu, MF_STRING, 103, L"Zoom Out (-15%)");
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(hMenu, MF_STRING | (m_settings.showFullUrl ? MF_CHECKED : MF_UNCHECKED), 104, L"Show Full Website Address");
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(hMenu, MF_STRING, 105, L"Settings for This Website\x2026");
+
+        POINT screenPt{ m_btnFormat.left, m_btnFormat.bottom + 4 };
+        ClientToScreen(m_hwnd, &screenPt);
+
+        int cmd = TrackPopupMenu(hMenu, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD, screenPt.x, screenPt.y, 0, m_hwnd, nullptr);
+        DestroyMenu(hMenu);
+
+        if (cmd == 101) {
+            m_settings.pageZoom = std::min(m_settings.pageZoom + 0.15, 3.0);
+            if (m_activeTab < m_tabs.size() && m_tabs[m_activeTab].webView) {
+                m_tabs[m_activeTab].webView->setPageZoom(m_settings.pageZoom);
+            }
+        } else if (cmd == 102) {
+            m_settings.pageZoom = 1.0;
+            if (m_activeTab < m_tabs.size() && m_tabs[m_activeTab].webView) {
+                m_tabs[m_activeTab].webView->setPageZoom(m_settings.pageZoom);
+            }
+        } else if (cmd == 103) {
+            m_settings.pageZoom = std::max(m_settings.pageZoom - 0.15, 0.5);
+            if (m_activeTab < m_tabs.size() && m_tabs[m_activeTab].webView) {
+                m_tabs[m_activeTab].webView->setPageZoom(m_settings.pageZoom);
+            }
+        } else if (cmd == 104) {
+            m_settings.showFullUrl = !m_settings.showFullUrl;
+            InvalidateRect(m_hwnd, &m_addressBarRect, FALSE);
+        } else if (cmd == 105) {
+            navigate(L"chronos:settings#websites");
         }
         return;
     }
@@ -1308,7 +1445,7 @@ void Browser::onMouseDown(POINT pt) {
 
     // New Tab Toolbar (+)
     if (PtInRect(&m_btnNewTabToolbar, pt)) {
-        createTab(L"chronos:start");
+        createTab(getDefaultTabUrl());
         return;
     }
 
@@ -1332,7 +1469,7 @@ void Browser::onMouseDown(POINT pt) {
         if (cmd >= 6000 && (size_t)(cmd - 6000) < m_tabs.size()) {
             selectTab(cmd - 6000);
         } else if (cmd == 6999) {
-            createTab(L"chronos:start");
+            createTab(getDefaultTabUrl());
         }
         return;
     }
@@ -1351,7 +1488,7 @@ void Browser::onMouseDown(POINT pt) {
 
     // New Tab in Bar (+)
     if (PtInRect(&m_btnNewTabInBar, pt)) {
-        createTab(L"chronos:start");
+        createTab(getDefaultTabUrl());
         return;
     }
 
@@ -1444,6 +1581,7 @@ void Browser::onMouseLeave() {
     m_hoverTraffic = 0;
     m_hoverBack = false;
     m_hoverForward = false;
+    m_hoverFormat = false;
     m_hoverReload = false;
     m_hoverSettings = false;
     m_hoverTab = -1;
@@ -1462,7 +1600,7 @@ bool Browser::onSetCursor() {
 bool Browser::onKeyDown(WPARAM key) {
     if (GetKeyState(VK_CONTROL) & 0x8000) {
         if (key == 'T') {
-            createTab(L"chronos:start");
+            createTab(getDefaultTabUrl());
             return true;
         }
         if (key == 'W') {
@@ -1491,6 +1629,7 @@ bool Browser::isHitInteractive(POINT pt) const {
     if (PtInRect(&m_btnSidebarToggle, pt)) return true;
     if (PtInRect(&m_btnNavBack, pt)) return true;
     if (PtInRect(&m_btnNavForward, pt)) return true;
+    if (PtInRect(&m_btnFormat, pt)) return true;
     if (PtInRect(&m_addressBarRect, pt)) return true;
     if (PtInRect(&m_btnReload, pt)) return true;
     if (!DownloadsManager::instance().items().empty() && PtInRect(&m_btnDownloads, pt)) return true;

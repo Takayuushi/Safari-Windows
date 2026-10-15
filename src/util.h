@@ -12,7 +12,7 @@ int dipToPx(int dip, UINT dpi);
 int pxToDip(int px, UINT dpi);
 RECT scaleRect(const RECT& rect, UINT dpi);
 
-std::wstring normalizeInput(const std::wstring& input);
+std::wstring normalizeInput(const std::wstring& input, const std::wstring& searchEngine = L"Google");
 std::wstring extractDomain(const std::wstring& url);
 bool isWebUrl(const std::wstring& input);
 

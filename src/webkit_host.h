@@ -54,6 +54,8 @@ public:
     bool canGoBack() const;
     bool canGoForward() const;
     double estimatedProgress() const;
+    void setPageZoom(double factor);
+    double pageZoom() const;
 
     std::wstring title() const;
     std::wstring url() const;

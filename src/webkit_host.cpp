@@ -162,6 +162,19 @@ bool WebView::create(HWND parent, const RECT& bounds) {
     const char* shimJs = R"js(
 (function() {
   try {
+    // Fullscreen API polyfill
+    try {
+      Object.defineProperty(document, 'fullscreenEnabled', { get: function() { return true; }, configurable: true });
+      Object.defineProperty(document, 'webkitFullscreenEnabled', { get: function() { return true; }, configurable: true });
+      if (!Element.prototype.requestFullscreen && Element.prototype.webkitRequestFullscreen) {
+        Element.prototype.requestFullscreen = Element.prototype.webkitRequestFullscreen;
+      }
+      if (!document.exitFullscreen && document.webkitExitFullscreen) {
+        document.exitFullscreen = document.webkitExitFullscreen;
+      }
+    } catch(fe) {}
+
+    // HTML5 Media compatibility shim
     if (window.HTMLMediaElement && window.HTMLMediaElement.prototype.canPlayType) {
       var origCanPlay = window.HTMLMediaElement.prototype.canPlayType;
       window.HTMLMediaElement.prototype.canPlayType = function(type) {
@@ -176,100 +189,106 @@ bool WebView::create(HWND parent, const RECT& bounds) {
       };
     }
 
+    // YouTube Watch Player Integration
     if (window.location && window.location.hostname && window.location.hostname.indexOf('youtube.com') !== -1) {
-      var currentConnectedVideoId = null;
+      var activeConnectedVid = null;
       var isConnecting = false;
 
-      function getVideoId() {
+      function checkWatchPage() {
+        var isWatch = window.location.pathname === '/watch';
+        if (!isWatch) {
+          var oldP = document.getElementById('chronos-native-video');
+          if (oldP) oldP.remove();
+          var mp = document.getElementById('movie_player');
+          if (mp) mp.style.display = '';
+          activeConnectedVid = null;
+          return;
+        }
+
         var match = window.location.search.match(/[?&]v=([^&]+)/);
-        if (match) return match[1];
-        var path = window.location.pathname;
-        if (path.indexOf('/embed/') === 0) return path.split('/')[2];
-        if (path.indexOf('/shorts/') === 0) return path.split('/')[2];
-        return null;
-      }
+        if (!match) return;
+        var vid = match[1];
+        if (vid === activeConnectedVid || isConnecting) return;
 
-      async function connectStream() {
-        var vid = getVideoId();
-        if (!vid || vid === currentConnectedVideoId || isConnecting) return;
+        var mp = document.getElementById('movie_player');
+        var parent = (mp && mp.parentElement) ? mp.parentElement :
+                     (document.getElementById('player-container') ||
+                      document.getElementById('player') ||
+                      document.querySelector('ytd-player'));
+        if (!parent) return;
+
         isConnecting = true;
+        var payload = {
+          context: {
+            client: {
+              clientName: 'ANDROID',
+              clientVersion: '21.26.364',
+              androidSdkVersion: 30,
+              userAgent: 'com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip',
+              osName: 'Android',
+              osVersion: '11',
+              hl: 'en',
+              timeZone: 'UTC',
+              utcOffsetMinutes: 0
+            }
+          },
+          videoId: vid,
+          playbackContext: { contentPlaybackContext: { html5Preference: 'HTML5_PREF_WANTS' } },
+          contentCheckOk: true,
+          racyCheckOk: true
+        };
 
-        try {
-          var payload = {
-            context: {
-              client: {
-                clientName: 'ANDROID',
-                clientVersion: '21.26.364',
-                androidSdkVersion: 30,
-                userAgent: 'com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip',
-                osName: 'Android',
-                osVersion: '11',
-                hl: 'en',
-                timeZone: 'UTC',
-                utcOffsetMinutes: 0
-              }
-            },
-            videoId: vid,
-            playbackContext: {
-              contentPlaybackContext: {
-                html5Preference: 'HTML5_PREF_WANTS'
-              }
-            },
-            contentCheckOk: true,
-            racyCheckOk: true
-          };
-
-          var res = await fetch('https://www.youtube.com/youtubei/v1/player', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-YouTube-Client-Name': '3',
-              'X-YouTube-Client-Version': '21.26.364'
-            },
-            body: JSON.stringify(payload)
-          });
-
-          var data = await res.json();
+        fetch('https://www.youtube.com/youtubei/v1/player', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-YouTube-Client-Name': '3',
+            'X-YouTube-Client-Version': '21.26.364'
+          },
+          body: JSON.stringify(payload)
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
           var formats = data && data.streamingData && data.streamingData.formats;
-          if (formats && formats.length > 0 && formats[0].url) {
-            var streamUrl = formats[0].url;
-            currentConnectedVideoId = vid;
+          if (formats && formats.length > 0) {
+            var best = formats.find(function(f) { return f.itag === 22 && f.url; }) ||
+                       formats.find(function(f) { return f.url; }) ||
+                       formats[0];
+            if (best && best.url) {
+              var streamUrl = best.url;
+              activeConnectedVid = vid;
 
-            var attachInterval = setInterval(function() {
-              var video = document.querySelector('video.video-stream.html5-main-video') || document.querySelector('video');
-              if (video) {
-                if (video.src !== streamUrl) {
-                  video.src = streamUrl;
-                  video.load();
-                  video.play().catch(function() {});
-                }
-                var spinner = document.querySelector('.ytp-spinner');
-                if (spinner) spinner.style.setProperty('display', 'none', 'important');
-                clearInterval(attachInterval);
+              var curMp = document.getElementById('movie_player');
+              if (curMp) curMp.style.setProperty('display', 'none', 'important');
+
+              var video = document.getElementById('chronos-native-video');
+              if (!video) {
+                video = document.createElement('video');
+                video.id = 'chronos-native-video';
+                video.controls = true;
+                video.autoplay = true;
+                video.playsInline = true;
+                video.style.cssText = 'width:100%;height:100%;min-height:460px;background:#000;border-radius:12px;outline:none;object-fit:contain;position:relative;z-index:9999;display:block;';
+                parent.insertBefore(video, parent.firstChild);
               }
-            }, 100);
-            setTimeout(function() { clearInterval(attachInterval); }, 5000);
+              if (video.src !== streamUrl) {
+                video.src = streamUrl;
+                video.load();
+                video.play().catch(function() {});
+              }
+            }
           }
-        } catch (e) {
-        } finally {
+        })
+        .catch(function(err) {})
+        .finally(function() {
           isConnecting = false;
-        }
+        });
       }
 
-      window.addEventListener('yt-navigate-finish', function() {
-        currentConnectedVideoId = null;
-        connectStream();
-      });
-      window.addEventListener('popstate', function() {
-        connectStream();
-      });
-      document.addEventListener('DOMContentLoaded', connectStream);
-      setInterval(function() {
-        var vid = getVideoId();
-        if (vid && vid !== currentConnectedVideoId) {
-          connectStream();
-        }
-      }, 500);
+      window.addEventListener('yt-navigate-finish', checkWatchPage);
+      window.addEventListener('popstate', checkWatchPage);
+      document.addEventListener('DOMContentLoaded', checkWatchPage);
+      setInterval(checkWatchPage, 750);
     }
   } catch(e) {}
 })();
@@ -394,6 +413,16 @@ bool WebView::canGoForward() const {
 
 double WebView::estimatedProgress() const {
     return m_page ? WKPageGetEstimatedProgress(m_page) : 0.0;
+}
+
+void WebView::setPageZoom(double factor) {
+    if (m_page) {
+        WKPageSetPageZoomFactor(m_page, factor);
+    }
+}
+
+double WebView::pageZoom() const {
+    return m_page ? WKPageGetPageZoomFactor(m_page) : 1.0;
 }
 
 std::wstring WebView::title() const {

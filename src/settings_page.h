@@ -1,11 +1,22 @@
 #pragma once
 
 #include <string>
+#include <cmath>
 #include "logo_data.h"
+#include "util.h"
 
 namespace safari {
 
-inline std::string getSettingsPageHtml() {
+struct BrowserSettings {
+    bool showFullUrl = false;
+    std::wstring searchEngine = L"Google";     // Google, DuckDuckGo, Bing, Yahoo, Ecosia
+    std::wstring newTabSetting = L"Start Page"; // Start Page, Homepage, Empty Page
+    std::wstring homepage = L"chronos:start";
+    double pageZoom = 1.0;
+    bool devToolsEnabled = true;
+};
+
+inline std::string getSettingsPageHtml(const BrowserSettings& s = BrowserSettings{}) {
     std::string html = R"HTML(<!doctype html>
 <html>
 <head>
@@ -196,12 +207,12 @@ inline std::string getSettingsPageHtml() {
       <div class="row">
         <div class="label-group">
           <div class="label">New tabs open with</div>
-          <div class="desc">Page to display when clicking + in the tab bar</div>
+          <div class="desc">Page to display when clicking + in the tab bar or opening new tabs</div>
         </div>
-        <select>
-          <option selected>Start Page</option>
-          <option>Homepage</option>
-          <option>Empty Page</option>
+        <select onchange="saveSetting('newTab', this.value)">
+          <option )HTML" + (s.newTabSetting == L"Start Page" ? std::string("selected") : "") + R"HTML(>Start Page</option>
+          <option )HTML" + (s.newTabSetting == L"Homepage" ? std::string("selected") : "") + R"HTML(>Homepage</option>
+          <option )HTML" + (s.newTabSetting == L"Empty Page" ? std::string("selected") : "") + R"HTML(>Empty Page</option>
         </select>
       </div>
       <div class="row">
@@ -209,7 +220,7 @@ inline std::string getSettingsPageHtml() {
           <div class="label">Homepage</div>
           <div class="desc">Default website URL for new browser sessions</div>
         </div>
-        <input type="text" value="chronos:start" style="width:220px">
+        <input type="text" id="homepageInput" value=")HTML" + toUtf8(s.homepage) + R"HTML(" style="width:240px" onchange="saveSetting('homepage', this.value)">
       </div>
       <div class="row">
         <div class="label-group">
@@ -229,7 +240,7 @@ inline std::string getSettingsPageHtml() {
           <div class="label">File download location</div>
           <div class="desc">Files downloaded from web pages will be saved directly here</div>
         </div>
-        <button class="btn-action">Downloads Folder</button>
+        <button class="btn-action" onclick="location.href='chronos:open_downloads_folder'">Downloads Folder</button>
       </div>
       <div class="row">
         <div class="label-group">
@@ -360,12 +371,12 @@ inline std::string getSettingsPageHtml() {
           <div class="label">Default Search Engine</div>
           <div class="desc">Used for web searches entered into the Smart Search field</div>
         </div>
-        <select>
-          <option selected>Google</option>
-          <option>DuckDuckGo</option>
-          <option>Bing</option>
-          <option>Yahoo</option>
-          <option>Ecosia</option>
+        <select onchange="saveSetting('searchEngine', this.value)">
+          <option )HTML" + (s.searchEngine == L"Google" ? std::string("selected") : "") + R"HTML(>Google</option>
+          <option )HTML" + (s.searchEngine == L"DuckDuckGo" ? std::string("selected") : "") + R"HTML(>DuckDuckGo</option>
+          <option )HTML" + (s.searchEngine == L"Bing" ? std::string("selected") : "") + R"HTML(>Bing</option>
+          <option )HTML" + (s.searchEngine == L"Yahoo" ? std::string("selected") : "") + R"HTML(>Yahoo</option>
+          <option )HTML" + (s.searchEngine == L"Ecosia" ? std::string("selected") : "") + R"HTML(>Ecosia</option>
         </select>
       </div>
       <div class="row">
@@ -448,9 +459,12 @@ inline std::string getSettingsPageHtml() {
       <div class="row">
         <div class="label-group">
           <div class="label">Hide IP address from known trackers</div>
-          <div class="desc">Protect your geographic location from analytics fingerprints</div>
+          <div class="desc">Protect your geographic location via iCloud Private Relay</div>
         </div>
-        <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="badge" style="background:rgba(255,255,255,0.08);color:#8e8e93;font-size:11px">Apple Ecosystem</span>
+          <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+        </div>
       </div>
       <div class="row">
         <div class="label-group">
@@ -464,7 +478,7 @@ inline std::string getSettingsPageHtml() {
           <div class="label">Manage Website Data</div>
           <div class="desc">View and prune stored cache, databases, and local storage</div>
         </div>
-        <button class="btn-action btn-danger" onclick="alert('Website cache and cookies cleared successfully!')">Clear All Data…</button>
+        <button class="btn-action btn-danger" onclick="if(confirm('Are you sure you want to clear browsing history, download logs, and cached data?')){ location.href='chronos:clear_all_data'; }">Clear All Data…</button>
       </div>
     </div>
   </div>
@@ -533,11 +547,11 @@ inline std::string getSettingsPageHtml() {
           <div class="label">Default Page Zoom</div>
           <div class="desc">Global magnification level applied to all web content</div>
         </div>
-        <select>
-          <option selected>100%</option>
-          <option>115%</option>
-          <option>125%</option>
-          <option>150%</option>
+        <select onchange="saveSetting('pageZoom', this.value)">
+          <option value="1.0" )HTML" + (std::abs(s.pageZoom - 1.0) < 0.05 ? std::string("selected") : "") + R"HTML(>100%</option>
+          <option value="1.15" )HTML" + (std::abs(s.pageZoom - 1.15) < 0.05 ? std::string("selected") : "") + R"HTML(>115%</option>
+          <option value="1.25" )HTML" + (std::abs(s.pageZoom - 1.25) < 0.05 ? std::string("selected") : "") + R"HTML(>125%</option>
+          <option value="1.5" )HTML" + (std::abs(s.pageZoom - 1.5) < 0.05 ? std::string("selected") : "") + R"HTML(>150%</option>
         </select>
       </div>
     </div>
@@ -552,7 +566,7 @@ inline std::string getSettingsPageHtml() {
           <div class="label">Show full website address</div>
           <div class="desc">Always display the complete URL instead of domain only in address bar</div>
         </div>
-        <label class="switch"><input type="checkbox"><span class="slider"></span></label>
+        <label class="switch"><input type="checkbox" )HTML" + (s.showFullUrl ? std::string("checked") : "") + R"HTML( onchange="saveSetting('showFullUrl', this.checked ? 'true' : 'false')"><span class="slider"></span></label>
       </div>
       <div class="row">
         <div class="label-group">
@@ -571,7 +585,7 @@ inline std::string getSettingsPageHtml() {
           <div class="label">WebKit Web Inspector (Developer Tools)</div>
           <div class="desc">Enable inspecting DOM elements, JavaScript console, and network logs</div>
         </div>
-        <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+        <label class="switch"><input type="checkbox" )HTML" + (s.devToolsEnabled ? std::string("checked") : "") + R"HTML( onchange="saveSetting('devTools', this.checked ? 'true' : 'false')"><span class="slider"></span></label>
       </div>
       <div class="row">
         <div class="label-group">
@@ -588,9 +602,24 @@ inline std::string getSettingsPageHtml() {
 function showTab(id, btn) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.content').forEach(c => c.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById(id).classList.add('active');
+  if (btn) btn.classList.add('active');
+  var target = document.getElementById(id);
+  if (target) target.classList.add('active');
+  location.hash = id;
 }
+
+function saveSetting(key, val) {
+  var activeTab = location.hash || '#general';
+  location.href = 'chronos:setting?key=' + encodeURIComponent(key) + '&val=' + encodeURIComponent(val) + activeTab;
+}
+
+window.addEventListener('DOMContentLoaded', function() {
+  var h = (location.hash || '').replace('#', '');
+  if (h) {
+    var btn = document.querySelector(".tab-btn[onclick*='" + h + "']");
+    if (btn) showTab(h, btn);
+  }
+});
 </script>
 </body>
 </html>)HTML";

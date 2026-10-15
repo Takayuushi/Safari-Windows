@@ -8,6 +8,7 @@
 #include <memory>
 #include "webkit_host.h"
 #include "downloads.h"
+#include "settings_page.h"
 
 namespace safari {
 
@@ -106,6 +107,7 @@ private:
     RECT m_btnNavBack{};
     RECT m_btnNavForward{};
     RECT m_addressBarRect{};
+    RECT m_btnFormat{};
     RECT m_btnReload{};
     RECT m_btnDownloads{};
     RECT m_btnShare{};
@@ -139,6 +141,7 @@ private:
     bool m_hoverBack = false;
     bool m_hoverForward = false;
     bool m_hoverAddress = false;
+    bool m_hoverFormat = false;
     bool m_hoverReload = false;
     bool m_hoverDownloads = false;
     bool m_hoverShare = false;
@@ -147,6 +150,10 @@ private:
     int m_hoverTab = -1;
     int m_hoverTabClose = -1;
     bool m_hoverNewTabInBar = false;
+
+    // Browser settings & preferences
+    BrowserSettings m_settings;
+    std::wstring getDefaultTabUrl() const;
 
     // Sidebar state
     int m_sidebarWidth = 320;

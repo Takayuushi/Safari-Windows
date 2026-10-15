@@ -59,7 +59,7 @@ RECT scaleRect(const RECT& r, UINT dpi) {
     };
 }
 
-std::wstring normalizeInput(const std::wstring& input) {
+std::wstring normalizeInput(const std::wstring& input, const std::wstring& searchEngine) {
     std::wstring trimmed = input;
     trimmed.erase(0, trimmed.find_first_not_of(L" \t\r\n"));
     trimmed.erase(trimmed.find_last_not_of(L" \t\r\n") + 1);
@@ -99,6 +99,19 @@ std::wstring normalizeInput(const std::wstring& input) {
             snprintf(buf, sizeof(buf), "%%%02X", c);
             escaped += buf;
         }
+    }
+
+    std::wstring se = searchEngine;
+    for (auto& c : se) c = towlower(c);
+
+    if (se == L"duckduckgo") {
+        return L"https://duckduckgo.com/?q=" + toUtf16(escaped);
+    } else if (se == L"bing") {
+        return L"https://www.bing.com/search?q=" + toUtf16(escaped);
+    } else if (se == L"yahoo") {
+        return L"https://search.yahoo.com/search?p=" + toUtf16(escaped);
+    } else if (se == L"ecosia") {
+        return L"https://www.ecosia.org/search?q=" + toUtf16(escaped);
     }
     return L"https://www.google.com/search?q=" + toUtf16(escaped);
 }
