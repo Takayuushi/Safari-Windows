@@ -159,29 +159,121 @@ bool WebView::create(HWND parent, const RECT& bounds) {
         createdUserContent = true;
     }
 
-    const char* shimJs =
-        "(function() {"
-        "  try {"
-        "    if (typeof window.MediaSource !== 'undefined') {"
-        "      var origIsTypeSupported = window.MediaSource.isTypeSupported.bind(window.MediaSource);"
-        "      window.MediaSource.isTypeSupported = function(type) {"
-        "        if (!type) return false;"
-        "        var l = type.toLowerCase();"
-        "        if (l.indexOf('avc1') !== -1 || l.indexOf('mp4a') !== -1 || l.indexOf('h264') !== -1 || l.indexOf('aac') !== -1) return true;"
-        "        return origIsTypeSupported(type);"
-        "      };"
-        "    }"
-        "    if (window.HTMLMediaElement && window.HTMLMediaElement.prototype.canPlayType) {"
-        "      var origCanPlay = window.HTMLMediaElement.prototype.canPlayType;"
-        "      window.HTMLMediaElement.prototype.canPlayType = function(type) {"
-        "        if (!type) return '';"
-        "        var l = type.toLowerCase();"
-        "        if (l.indexOf('avc1') !== -1 || l.indexOf('mp4a') !== -1 || l.indexOf('video/mp4') !== -1 || l.indexOf('audio/mp4') !== -1) return 'probably';"
-        "        return origCanPlay.call(this, type);"
-        "      };"
-        "    }"
-        "  } catch(e) {}"
-        "})();";
+    const char* shimJs = R"js(
+(function() {
+  try {
+    if (window.HTMLMediaElement && window.HTMLMediaElement.prototype.canPlayType) {
+      var origCanPlay = window.HTMLMediaElement.prototype.canPlayType;
+      window.HTMLMediaElement.prototype.canPlayType = function(type) {
+        if (!type) return '';
+        var l = type.toLowerCase();
+        if (l.indexOf('avc1') !== -1 || l.indexOf('mp4a') !== -1 ||
+            l.indexOf('video/mp4') !== -1 || l.indexOf('audio/mp4') !== -1 ||
+            l.indexOf('mpegurl') !== -1 || l.indexOf('m3u8') !== -1) {
+          return 'probably';
+        }
+        return origCanPlay.call(this, type);
+      };
+    }
+
+    if (window.location && window.location.hostname && window.location.hostname.indexOf('youtube.com') !== -1) {
+      var currentConnectedVideoId = null;
+      var isConnecting = false;
+
+      function getVideoId() {
+        var match = window.location.search.match(/[?&]v=([^&]+)/);
+        if (match) return match[1];
+        var path = window.location.pathname;
+        if (path.indexOf('/embed/') === 0) return path.split('/')[2];
+        if (path.indexOf('/shorts/') === 0) return path.split('/')[2];
+        return null;
+      }
+
+      async function connectStream() {
+        var vid = getVideoId();
+        if (!vid || vid === currentConnectedVideoId || isConnecting) return;
+        isConnecting = true;
+
+        try {
+          var payload = {
+            context: {
+              client: {
+                clientName: 'ANDROID',
+                clientVersion: '21.26.364',
+                androidSdkVersion: 30,
+                userAgent: 'com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip',
+                osName: 'Android',
+                osVersion: '11',
+                hl: 'en',
+                timeZone: 'UTC',
+                utcOffsetMinutes: 0
+              }
+            },
+            videoId: vid,
+            playbackContext: {
+              contentPlaybackContext: {
+                html5Preference: 'HTML5_PREF_WANTS'
+              }
+            },
+            contentCheckOk: true,
+            racyCheckOk: true
+          };
+
+          var res = await fetch('https://www.youtube.com/youtubei/v1/player', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-YouTube-Client-Name': '3',
+              'X-YouTube-Client-Version': '21.26.364'
+            },
+            body: JSON.stringify(payload)
+          });
+
+          var data = await res.json();
+          var formats = data && data.streamingData && data.streamingData.formats;
+          if (formats && formats.length > 0 && formats[0].url) {
+            var streamUrl = formats[0].url;
+            currentConnectedVideoId = vid;
+
+            var attachInterval = setInterval(function() {
+              var video = document.querySelector('video.video-stream.html5-main-video') || document.querySelector('video');
+              if (video) {
+                if (video.src !== streamUrl) {
+                  video.src = streamUrl;
+                  video.load();
+                  video.play().catch(function() {});
+                }
+                var spinner = document.querySelector('.ytp-spinner');
+                if (spinner) spinner.style.setProperty('display', 'none', 'important');
+                clearInterval(attachInterval);
+              }
+            }, 100);
+            setTimeout(function() { clearInterval(attachInterval); }, 5000);
+          }
+        } catch (e) {
+        } finally {
+          isConnecting = false;
+        }
+      }
+
+      window.addEventListener('yt-navigate-finish', function() {
+        currentConnectedVideoId = null;
+        connectStream();
+      });
+      window.addEventListener('popstate', function() {
+        connectStream();
+      });
+      document.addEventListener('DOMContentLoaded', connectStream);
+      setInterval(function() {
+        var vid = getVideoId();
+        if (vid && vid !== currentConnectedVideoId) {
+          connectStream();
+        }
+      }, 500);
+    }
+  } catch(e) {}
+})();
+)js";
 
     WKStringRef scriptStr = WKStringCreateWithUTF8CString(shimJs);
     WKUserScriptRef userScript = WKUserScriptCreateWithSource(scriptStr, kWKInjectAtDocumentStart, false);
@@ -243,6 +335,8 @@ void WebView::setVisible(bool visible) {
         if (visible) {
             ShowWindow(w, SW_SHOW);
             SetWindowPos(w, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            InvalidateRect(w, nullptr, TRUE);
+            UpdateWindow(w);
             RedrawWindow(w, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN | RDW_ERASE);
         } else {
             ShowWindow(w, SW_HIDE);

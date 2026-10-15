@@ -69,6 +69,10 @@ std::wstring normalizeInput(const std::wstring& input) {
     if (trimmed == L"chronos:settings" || trimmed == L"safari:settings" || trimmed == L"settings") return L"chronos:settings";
     if (trimmed == L"chronos:downloads" || trimmed == L"safari:downloads" || trimmed == L"downloads") return L"chronos:downloads";
     if (trimmed.starts_with(L"chronos:") || trimmed.starts_with(L"safari:")) return trimmed;
+    if (trimmed.starts_with(L"file://")) return trimmed;
+    if (trimmed.length() >= 3 && iswalpha(trimmed[0]) && trimmed[1] == L':' && (trimmed[2] == L'\\' || trimmed[2] == L'/')) {
+        return L"file:///" + trimmed;
+    }
 
     if (trimmed.rfind(L"http://", 0) == 0 || trimmed.rfind(L"https://", 0) == 0) {
         return trimmed;

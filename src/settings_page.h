@@ -46,8 +46,55 @@ inline std::string getSettingsPageHtml() {
   .label{font-size:14px;font-weight:500;color:#f5f5f7}
   .desc{font-size:12.5px;color:#8e8e93;line-height:1.4}
 
-  select,input[type="text"]{background:#1a1a1d;color:#f5f5f7;border:1px solid rgba(255,255,255,0.12);border-radius:7px;padding:7px 12px;font-size:13px;outline:none}
-  select:focus,input[type="text"]:focus{border-color:#2997ff}
+  select {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-color: #2c2c30 !important;
+    color: #f5f5f7 !important;
+    border: 1px solid rgba(255, 255, 255, 0.16) !important;
+    border-radius: 8px !important;
+    padding: 7px 34px 7px 14px !important;
+    font-size: 13px !important;
+    font-family: inherit !important;
+    outline: none !important;
+    cursor: pointer !important;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%238e8e93'%3e%3cpath d='M7 10l5 5 5-5z'/%3e%3c/svg%3e") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 8px center !important;
+    background-size: 16px !important;
+    min-width: 190px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2) !important;
+  }
+  select option {
+    background-color: #252529 !important;
+    color: #f5f5f7 !important;
+    padding: 8px 12px;
+  }
+  select:hover {
+    background-color: #38383e !important;
+    border-color: rgba(255, 255, 255, 0.28) !important;
+  }
+  select:focus {
+    border-color: #2997ff !important;
+    box-shadow: 0 0 0 2px rgba(41, 151, 255, 0.3) !important;
+  }
+
+  input[type="text"] {
+    -webkit-appearance: none;
+    appearance: none;
+    background-color: #1a1a1d !important;
+    color: #f5f5f7 !important;
+    border: 1px solid rgba(255, 255, 255, 0.14) !important;
+    border-radius: 8px !important;
+    padding: 7px 12px !important;
+    font-size: 13px !important;
+    outline: none !important;
+  }
+  input[type="text"]:focus {
+    border-color: #2997ff !important;
+    box-shadow: 0 0 0 2px rgba(41, 151, 255, 0.3) !important;
+  }
 
   /* macOS Switch */
   .switch{position:relative;display:inline-block;width:42px;height:24px;flex-shrink:0}

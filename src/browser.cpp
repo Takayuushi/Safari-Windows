@@ -46,9 +46,22 @@ bool Browser::initialize(HWND hwnd) {
 
     // Hook downloads listener
     DownloadsManager::instance().setChangeListener([this]() {
+        updateLayout();
         if (m_hwnd) InvalidateRect(m_hwnd, nullptr, FALSE);
         if (m_hwndDownloadsPopup && IsWindowVisible(m_hwndDownloadsPopup)) {
-            InvalidateRect(m_hwndDownloadsPopup, nullptr, TRUE);
+            InvalidateRect(m_hwndDownloadsPopup, nullptr, FALSE);
+        }
+        static ULONGLONG s_lastDlPageUpdate = 0;
+        ULONGLONG now = GetTickCount64();
+        if (now - s_lastDlPageUpdate >= 300) {
+            s_lastDlPageUpdate = now;
+            for (size_t i = 0; i < m_tabs.size(); ++i) {
+                if (m_tabs[i].url == L"chronos:downloads" || m_tabs[i].url == L"safari:downloads") {
+                    if (m_tabs[i].webView) {
+                        m_tabs[i].webView->loadHtml(getDownloadsPageHtml(), "chronos:downloads");
+                    }
+                }
+            }
         }
     });
 
@@ -86,8 +99,15 @@ bool Browser::initialize(HWND hwnd) {
         DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
     SendMessageW(m_editAddress, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-    // Initial Tab with Chronos Start Page
-    createTab(L"chronos:start");
+    // Initial Tab with Chronos Start Page or command-line URL
+    int nArgs = 0;
+    LPWSTR* szArgList = CommandLineToArgvW(GetCommandLineW(), &nArgs);
+    std::wstring initialUrl = L"chronos:start";
+    if (szArgList && nArgs > 1) {
+        initialUrl = normalizeInput(szArgList[1]);
+    }
+    if (szArgList) LocalFree(szArgList);
+    createTab(initialUrl);
     handleResize();
     return true;
 }
@@ -441,7 +461,12 @@ void Browser::updateLayout() {
     m_btnReload = RECT{ m_addressBarRect.right - 32, 11, m_addressBarRect.right - 4, 39 };
 
     // Right Action Buttons
-    m_btnDownloads      = RECT{ width - 146, 10, width - 114, 42 };
+    bool hasAnyDownloads = !DownloadsManager::instance().items().empty();
+    if (hasAnyDownloads) {
+        m_btnDownloads      = RECT{ width - 146, 10, width - 114, 42 };
+    } else {
+        m_btnDownloads      = RECT{ 0, 0, 0, 0 };
+    }
     m_btnShare          = RECT{ width - 110, 10, width - 78, 42 };
     m_btnNewTabToolbar  = RECT{ width - 74, 10, width - 42, 42 };
     m_btnOverview       = RECT{ width - 38, 10, width - 6, 42 };
@@ -604,68 +629,105 @@ void Browser::paintTopChrome(Gdiplus::Graphics& g, int width) {
     if (m_activeTab < m_tabs.size() && m_tabs[m_activeTab].isLoading && m_tabs[m_activeTab].webView) {
         double prog = m_tabs[m_activeTab].webView->estimatedProgress();
         if (prog < 0.08) prog = 0.08;
-        if (prog > 1.0) prog = 1.0;
-        int barWidth = (int)((addrRectF.Width - 16.0f) * (float)prog);
-        Gdiplus::SolidBrush progBrush(colors::AccentBlue);
-        g.FillRectangle(&progBrush, (int)addrRectF.X + 8, (int)addrRectF.Y + (int)addrRectF.Height - 3, barWidth, 2);
+        if (prog < 0.98) {
+            int barWidth = (int)((addrRectF.Width - 16.0f) * (float)prog);
+            Gdiplus::SolidBrush progBrush(colors::AccentBlue);
+            g.FillRectangle(&progBrush, (int)addrRectF.X + 8, (int)addrRectF.Y + (int)addrRectF.Height - 3, barWidth, 2);
+        }
     }
 
     // Right Action Buttons
-    // Downloads Button (Safari circular progress indicator)
-    float dlCenterX = (float)m_btnDownloads.left + 16.0f;
-    float dlCenterY = (float)m_btnDownloads.top + 16.0f;
-    float dlRadius = 9.0f;
+    bool hasAnyDownloads = !DownloadsManager::instance().items().empty();
+    if (hasAnyDownloads) {
+        float dlCenterX = (float)m_btnDownloads.left + 16.0f;
+        float dlCenterY = (float)m_btnDownloads.top + 16.0f;
+        float dlRadius = 9.0f;
 
-    bool hasDownloads = DownloadsManager::instance().hasActiveDownloads();
-    double overallProg = DownloadsManager::instance().overallProgress();
+        bool hasActive = DownloadsManager::instance().hasActiveDownloads();
+        double overallProg = DownloadsManager::instance().overallProgress();
 
-    if (hasDownloads) {
-        // Track ring
-        Gdiplus::Pen trackPen(Gdiplus::Color(255, 65, 65, 75), 2.0f);
-        g.DrawEllipse(&trackPen, dlCenterX - dlRadius, dlCenterY - dlRadius, dlRadius * 2.0f, dlRadius * 2.0f);
+        if (m_hoverDownloads) {
+            Gdiplus::SolidBrush hoverBg(Gdiplus::Color(255, 48, 48, 54));
+            fillRoundedRect(g, hoverBg, Gdiplus::RectF((float)m_btnDownloads.left, (float)m_btnDownloads.top, 32.0f, 32.0f), 6.0f);
+        }
 
-        // Progress sweep ring (starts from 12 o'clock / -90 deg, sweeps clockwise)
-        float sweepAngle = std::max(20.0f, (float)(overallProg * 360.0));
-        Gdiplus::Pen progressPen(colors::AccentBlue, 2.2f);
-        g.DrawArc(&progressPen, dlCenterX - dlRadius, dlCenterY - dlRadius, dlRadius * 2.0f, dlRadius * 2.0f, -90.0f, sweepAngle);
+        if (hasActive) {
+            // Track ring
+            Gdiplus::Pen trackPen(Gdiplus::Color(255, 65, 65, 75), 2.0f);
+            g.DrawEllipse(&trackPen, dlCenterX - dlRadius, dlCenterY - dlRadius, dlRadius * 2.0f, dlRadius * 2.0f);
 
-        // Downward Arrow in center
-        Gdiplus::Pen arrowPen(colors::AccentBlue, 1.6f);
-        g.DrawLine(&arrowPen, dlCenterX, dlCenterY - 4.0f, dlCenterX, dlCenterY + 4.0f);
-        Gdiplus::PointF arrowHead[3] = {
-            { dlCenterX - 3.5f, dlCenterY + 1.0f },
-            { dlCenterX, dlCenterY + 4.5f },
-            { dlCenterX + 3.5f, dlCenterY + 1.0f }
-        };
-        g.DrawLines(&arrowPen, arrowHead, 3);
-    } else {
-        Gdiplus::Pen dlPen(m_hoverDownloads ? colors::TextPrimary : colors::TextSecondary, 1.6f);
-        g.DrawEllipse(&dlPen, dlCenterX - dlRadius, dlCenterY - dlRadius, dlRadius * 2.0f, dlRadius * 2.0f);
-        g.DrawLine(&dlPen, dlCenterX, dlCenterY - 5.0f, dlCenterX, dlCenterY + 3.0f);
-        Gdiplus::PointF arrowHead[3] = {
-            { dlCenterX - 4.0f, dlCenterY },
-            { dlCenterX, dlCenterY + 4.0f },
-            { dlCenterX + 4.0f, dlCenterY }
-        };
-        g.DrawLines(&dlPen, arrowHead, 3);
+            // Progress sweep ring (starts from 12 o'clock / -90 deg, sweeps clockwise)
+            float sweepAngle = std::max(20.0f, (float)(overallProg * 360.0));
+            Gdiplus::Pen progressPen(colors::AccentBlue, 2.2f);
+            g.DrawArc(&progressPen, dlCenterX - dlRadius, dlCenterY - dlRadius, dlRadius * 2.0f, dlRadius * 2.0f, -90.0f, sweepAngle);
+
+            // Downward Arrow in center
+            Gdiplus::Pen arrowPen(colors::AccentBlue, 1.6f);
+            g.DrawLine(&arrowPen, dlCenterX, dlCenterY - 4.0f, dlCenterX, dlCenterY + 4.0f);
+            Gdiplus::PointF arrowHead[3] = {
+                { dlCenterX - 3.5f, dlCenterY + 1.0f },
+                { dlCenterX, dlCenterY + 4.5f },
+                { dlCenterX + 3.5f, dlCenterY + 1.0f }
+            };
+            g.DrawLines(&arrowPen, arrowHead, 3);
+        } else {
+            Gdiplus::Pen dlPen(m_hoverDownloads ? colors::TextPrimary : colors::TextSecondary, 1.6f);
+            g.DrawEllipse(&dlPen, dlCenterX - dlRadius, dlCenterY - dlRadius, dlRadius * 2.0f, dlRadius * 2.0f);
+            g.DrawLine(&dlPen, dlCenterX, dlCenterY - 5.0f, dlCenterX, dlCenterY + 3.0f);
+            Gdiplus::PointF arrowHead[3] = {
+                { dlCenterX - 4.0f, dlCenterY },
+                { dlCenterX, dlCenterY + 4.0f },
+                { dlCenterX + 4.0f, dlCenterY }
+            };
+            g.DrawLines(&dlPen, arrowHead, 3);
+        }
     }
 
-    // Share Button
-    Gdiplus::Pen toolPen(colors::TextSecondary, 1.6f);
-    g.DrawRectangle(&toolPen, (int)m_btnShare.left + 8, (int)m_btnShare.top + 13, 14, 11);
-    g.DrawLine(&toolPen, (int)m_btnShare.left + 15, (int)m_btnShare.top + 7, (int)m_btnShare.left + 15, (int)m_btnShare.top + 16);
+    // Share Button (Safari open square box with upward arrow)
+    if (m_hoverShare) {
+        Gdiplus::SolidBrush hoverBg(Gdiplus::Color(255, 48, 48, 54));
+        fillRoundedRect(g, hoverBg, Gdiplus::RectF((float)m_btnShare.left, (float)m_btnShare.top, 32.0f, 32.0f), 6.0f);
+    }
+    Gdiplus::Pen sharePen(m_hoverShare ? colors::TextPrimary : colors::TextSecondary, 1.6f);
+    float shX = (float)m_btnShare.left + 16.0f;
+    float shY = (float)m_btnShare.top + 16.0f;
+    Gdiplus::PointF boxPts[4] = {
+        { shX - 7.0f, shY - 1.0f },
+        { shX - 7.0f, shY + 7.0f },
+        { shX + 7.0f, shY + 7.0f },
+        { shX + 7.0f, shY - 1.0f }
+    };
+    g.DrawLines(&sharePen, boxPts, 4);
+    g.DrawLine(&sharePen, shX, shY + 3.0f, shX, shY - 8.0f);
+    Gdiplus::PointF arrPts[3] = {
+        { shX - 3.5f, shY - 4.5f },
+        { shX, shY - 8.5f },
+        { shX + 3.5f, shY - 4.5f }
+    };
+    g.DrawLines(&sharePen, arrPts, 3);
 
     // New Tab Toolbar (+)
-    g.DrawLine(&toolPen, (int)m_btnNewTabToolbar.left + 16, (int)m_btnNewTabToolbar.top + 10, (int)m_btnNewTabToolbar.left + 16, (int)m_btnNewTabToolbar.top + 22);
-    g.DrawLine(&toolPen, (int)m_btnNewTabToolbar.left + 10, (int)m_btnNewTabToolbar.top + 16, (int)m_btnNewTabToolbar.left + 22, (int)m_btnNewTabToolbar.top + 16);
+    if (m_hoverNewTab) {
+        Gdiplus::SolidBrush hoverBg(Gdiplus::Color(255, 48, 48, 54));
+        fillRoundedRect(g, hoverBg, Gdiplus::RectF((float)m_btnNewTabToolbar.left, (float)m_btnNewTabToolbar.top, 32.0f, 32.0f), 6.0f);
+    }
+    Gdiplus::Pen newTabPen(m_hoverNewTab ? colors::TextPrimary : colors::TextSecondary, 1.6f);
+    float ntX = (float)m_btnNewTabToolbar.left + 16.0f;
+    float ntY = (float)m_btnNewTabToolbar.top + 16.0f;
+    g.DrawLine(&newTabPen, ntX, ntY - 6.0f, ntX, ntY + 6.0f);
+    g.DrawLine(&newTabPen, ntX - 6.0f, ntY, ntX + 6.0f, ntY);
 
     // Overview Button (Show All Tabs - Safari Two Overlapping Cards)
+    if (m_hoverOverview) {
+        Gdiplus::SolidBrush hoverBg(Gdiplus::Color(255, 48, 48, 54));
+        fillRoundedRect(g, hoverBg, Gdiplus::RectF((float)m_btnOverview.left, (float)m_btnOverview.top, 32.0f, 32.0f), 6.0f);
+    }
     Gdiplus::Pen ovPen(m_hoverOverview ? colors::TextPrimary : colors::TextSecondary, 1.4f);
-    Gdiplus::SolidBrush ovBg(colors::ChromeBg);
-    fillRoundedRect(g, ovBg, Gdiplus::RectF((float)m_btnOverview.left + 7.0f, (float)m_btnOverview.top + 9.0f, 13.0f, 11.0f), 2.0f);
-    drawRoundedRect(g, ovPen, Gdiplus::RectF((float)m_btnOverview.left + 7.0f, (float)m_btnOverview.top + 9.0f, 13.0f, 11.0f), 2.0f);
-    fillRoundedRect(g, ovBg, Gdiplus::RectF((float)m_btnOverview.left + 12.0f, (float)m_btnOverview.top + 13.0f, 13.0f, 11.0f), 2.0f);
-    drawRoundedRect(g, ovPen, Gdiplus::RectF((float)m_btnOverview.left + 12.0f, (float)m_btnOverview.top + 13.0f, 13.0f, 11.0f), 2.0f);
+    Gdiplus::SolidBrush ovBg(m_hoverOverview ? Gdiplus::Color(255, 48, 48, 54) : colors::ChromeBg);
+    fillRoundedRect(g, ovBg, Gdiplus::RectF((float)m_btnOverview.left + 7.0f, (float)m_btnOverview.top + 9.0f, 12.0f, 10.0f), 2.0f);
+    drawRoundedRect(g, ovPen, Gdiplus::RectF((float)m_btnOverview.left + 7.0f, (float)m_btnOverview.top + 9.0f, 12.0f, 10.0f), 2.0f);
+    fillRoundedRect(g, ovBg, Gdiplus::RectF((float)m_btnOverview.left + 12.0f, (float)m_btnOverview.top + 13.0f, 12.0f, 10.0f), 2.0f);
+    drawRoundedRect(g, ovPen, Gdiplus::RectF((float)m_btnOverview.left + 12.0f, (float)m_btnOverview.top + 13.0f, 12.0f, 10.0f), 2.0f);
 }
 
 void Browser::paintTabBar(Gdiplus::Graphics& g) {
@@ -887,7 +949,11 @@ void Browser::paintDownloadsPopup(HDC hdc) {
     int popWidth = client.right - client.left;
     int popHeight = client.bottom - client.top;
 
-    Gdiplus::Graphics g(hdc);
+    HDC memDC = CreateCompatibleDC(hdc);
+    HBITMAP memBmp = CreateCompatibleBitmap(hdc, popWidth, popHeight);
+    HGDIOBJ oldBmp = SelectObject(memDC, memBmp);
+
+    Gdiplus::Graphics g(memDC);
     g.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
     g.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
 
@@ -973,7 +1039,7 @@ void Browser::paintDownloadsPopup(HDC hdc) {
         }
     }
 
-    // Footer: Show All Downloads
+    // Footer: Show All
     Gdiplus::Pen divPen(colors::PopoverBorder, 1.0f);
     g.DrawLine(&divPen, 0, popHeight - 38, popWidth, popHeight - 38);
 
@@ -981,7 +1047,12 @@ void Browser::paintDownloadsPopup(HDC hdc) {
     Gdiplus::StringFormat footSf;
     footSf.SetAlignment(Gdiplus::StringAlignmentCenter);
     footSf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-    g.DrawString(L"Show All Downloads", -1, &footFont, Gdiplus::RectF(0.0f, (float)popHeight - 36.0f, (float)popWidth, 32.0f), &footSf, &blueBrush);
+    g.DrawString(L"Show All \x203A", -1, &footFont, Gdiplus::RectF(0.0f, (float)popHeight - 36.0f, (float)popWidth, 32.0f), &footSf, &blueBrush);
+
+    BitBlt(hdc, 0, 0, popWidth, popHeight, memDC, 0, 0, SRCCOPY);
+    SelectObject(memDC, oldBmp);
+    DeleteObject(memBmp);
+    DeleteDC(memDC);
 }
 
 void Browser::onDownloadsPopupClick(POINT pt) {
@@ -991,10 +1062,17 @@ void Browser::onDownloadsPopupClick(POINT pt) {
 
     if (pt.x >= 260 && pt.x <= 310 && pt.y >= 10 && pt.y <= 36) {
         DownloadsManager::instance().clearCompleted();
-        if (m_hwndDownloadsPopup) InvalidateRect(m_hwndDownloadsPopup, nullptr, TRUE);
+        if (DownloadsManager::instance().items().empty()) {
+            m_downloadsPopoverOpen = false;
+            ShowWindow(m_hwndDownloadsPopup, SW_HIDE);
+        } else {
+            InvalidateRect(m_hwndDownloadsPopup, nullptr, FALSE);
+        }
+        updateLayout();
+        InvalidateRect(m_hwnd, nullptr, FALSE);
         return;
     }
-    // "Show All Downloads" footer
+    // "Show All" footer
     if (pt.y >= popHeight - 38) {
         toggleDownloadsPopover();
         createTab(L"chronos:downloads");
@@ -1022,6 +1100,8 @@ LRESULT CALLBACK Browser::downloadsPopupProc(HWND hwnd, UINT msg, WPARAM wParam,
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)cs->lpCreateParams);
         return TRUE;
     }
+    case WM_ERASEBKGND:
+        return 1;
     case WM_PAINT: {
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(hwnd, &ps);
@@ -1164,8 +1244,62 @@ void Browser::onMouseDown(POINT pt) {
     }
 
     // Downloads Button
-    if (PtInRect(&m_btnDownloads, pt)) {
+    bool hasAnyDownloads = !DownloadsManager::instance().items().empty();
+    if (hasAnyDownloads && PtInRect(&m_btnDownloads, pt)) {
         toggleDownloadsPopover();
+        return;
+    }
+
+    // Share Button
+    if (PtInRect(&m_btnShare, pt)) {
+        HMENU hMenu = CreatePopupMenu();
+        AppendMenuW(hMenu, MF_STRING, 5001, L"Copy Link");
+        AppendMenuW(hMenu, MF_STRING, 5002, L"Add to Bookmarks");
+        AppendMenuW(hMenu, MF_STRING, 5003, L"Add to Reading List");
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(hMenu, MF_STRING, 5004, L"Email This Page\x2026");
+
+        POINT screenPt = pt;
+        ClientToScreen(m_hwnd, &screenPt);
+        int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN, screenPt.x, screenPt.y + 10, 0, m_hwnd, nullptr);
+        DestroyMenu(hMenu);
+
+        std::wstring curUrl = (m_activeTab < m_tabs.size()) ? m_tabs[m_activeTab].url : L"";
+        std::wstring curTitle = (m_activeTab < m_tabs.size()) ? m_tabs[m_activeTab].title : L"";
+
+        if (cmd == 5001 && !curUrl.empty()) {
+            if (OpenClipboard(m_hwnd)) {
+                EmptyClipboard();
+                size_t len = (curUrl.size() + 1) * sizeof(wchar_t);
+                HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
+                if (hMem) {
+                    memcpy(GlobalLock(hMem), curUrl.c_str(), len);
+                    GlobalUnlock(hMem);
+                    SetClipboardData(CF_UNICODETEXT, hMem);
+                }
+                CloseClipboard();
+            }
+        } else if (cmd == 5002 && !curUrl.empty()) {
+            BookmarkItem b;
+            b.title = curTitle.empty() ? extractDomain(curUrl) : curTitle;
+            b.url = curUrl;
+            b.domain = extractDomain(curUrl);
+            b.color = RGB(0, 122, 255);
+            b.letter = b.title.empty() ? L'B' : towupper(b.title[0]);
+            m_bookmarks.push_back(b);
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+        } else if (cmd == 5003 && !curUrl.empty()) {
+            ReadingItem r;
+            r.title = curTitle.empty() ? extractDomain(curUrl) : curTitle;
+            r.url = curUrl;
+            r.domain = extractDomain(curUrl);
+            r.excerpt = curUrl;
+            m_readingList.push_back(r);
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+        } else if (cmd == 5004 && !curUrl.empty()) {
+            std::wstring mailto = L"mailto:?subject=" + curTitle + L"&body=" + curUrl;
+            ShellExecuteW(nullptr, L"open", mailto.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        }
         return;
     }
 
@@ -1175,10 +1309,27 @@ void Browser::onMouseDown(POINT pt) {
         return;
     }
 
-    // Tab Overview (Show All Tabs - 4th button)
+    // Tab Overview (Show All Tabs - Tab Switcher)
     if (PtInRect(&m_btnOverview, pt)) {
-        if (m_tabs.size() > 1) {
-            selectTab((m_activeTab + 1) % m_tabs.size());
+        HMENU hMenu = CreatePopupMenu();
+        for (size_t i = 0; i < m_tabs.size(); ++i) {
+            UINT flags = MF_STRING;
+            if (i == m_activeTab) flags |= MF_CHECKED;
+            std::wstring label = std::to_wstring(i + 1) + L". " + (m_tabs[i].title.empty() ? L"Untitled" : m_tabs[i].title);
+            AppendMenuW(hMenu, flags, (UINT_PTR)(6000 + i), label.c_str());
+        }
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(hMenu, MF_STRING, 6999, L"+ New Tab");
+
+        POINT screenPt = pt;
+        ClientToScreen(m_hwnd, &screenPt);
+        int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_RIGHTALIGN | TPM_TOPALIGN, screenPt.x + 20, screenPt.y + 10, 0, m_hwnd, nullptr);
+        DestroyMenu(hMenu);
+
+        if (cmd >= 6000 && (size_t)(cmd - 6000) < m_tabs.size()) {
+            selectTab(cmd - 6000);
+        } else if (cmd == 6999) {
+            createTab(L"chronos:start");
         }
         return;
     }
@@ -1339,7 +1490,7 @@ bool Browser::isHitInteractive(POINT pt) const {
     if (PtInRect(&m_btnNavForward, pt)) return true;
     if (PtInRect(&m_addressBarRect, pt)) return true;
     if (PtInRect(&m_btnReload, pt)) return true;
-    if (PtInRect(&m_btnDownloads, pt)) return true;
+    if (!DownloadsManager::instance().items().empty() && PtInRect(&m_btnDownloads, pt)) return true;
     if (PtInRect(&m_btnShare, pt)) return true;
     if (PtInRect(&m_btnNewTabToolbar, pt)) return true;
     if (PtInRect(&m_btnOverview, pt)) return true;
