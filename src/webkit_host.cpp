@@ -52,50 +52,53 @@ bool WebKitHost::initialize() {
     if (m_preferences) {
         WKPreferencesSetDeveloperExtrasEnabled(m_preferences, true);
         WKPreferencesSetJavaScriptEnabled(m_preferences, true);
-        // Enable Media / HTML5 Audio & Video playback (YouTube)
-        WKPreferencesSetMediaSourceEnabled(m_preferences, true);
         WKPreferencesSetWebAudioEnabled(m_preferences, true);
-        WKPreferencesSetMediaPlaybackAllowsInline(m_preferences, true);
-        WKPreferencesSetInlineMediaPlaybackRequiresConsumingUserGesture(m_preferences, false);
+        WKPreferencesSetMediaCapabilitiesEnabled(m_preferences, true);
+        WKPreferencesSetAllowMediaContentTypesRequiringHardwareSupportAsFallback(m_preferences, true);
     }
 
     // Set up Download Client to save files to Downloads folder
     WKContextDownloadClientV0 dlClient = {};
     dlClient.base.version = 0;
-    dlClient.didReceiveResponse = [](WKContextRef, WKDownloadRef download, WKURLResponseRef response, const void*) {
-        WKStringRef suggRef = WKURLResponseCopySuggestedFilename(response);
-        std::wstring name = wkStringToWString(suggRef);
-        if (suggRef) WKRelease(suggRef);
+
+    dlClient.decideDestinationWithSuggestedFilename = [](WKContextRef, WKDownloadRef, WKStringRef filename, bool* allowOverwrite, const void*) -> WKStringRef {
+        std::wstring name = wkStringToWString(filename);
         if (name.empty()) name = L"download.bin";
-
         std::wstring destPath = getDownloadsFolder() + L"\\" + name;
-        WKURLRef destUrl = WKURLCreateWithUTF8CString(toUtf8(destPath).c_str());
-        WKDownloadSetDestinationURL(download, destUrl, true);
-        WKRelease(destUrl);
+        if (allowOverwrite) *allowOverwrite = true;
+        return WKStringCreateWithUTF8CString(toUtf8(destPath).c_str());
+    };
 
-        int64_t total = WKURLResponseGetExpectedContentLength(response);
-        WKURLRef urlRef = WKURLResponseCopyURL(response);
+    dlClient.didReceiveResponse = [](WKContextRef, WKDownloadRef download, WKURLResponseRef response, const void*) {
+        WKURLRef urlRef = response ? WKURLResponseCopyURL(response) : nullptr;
         WKStringRef urlStr = urlRef ? WKURLCopyString(urlRef) : nullptr;
         std::wstring url = wkStringToWString(urlStr);
         if (urlStr) WKRelease(urlStr);
         if (urlRef) WKRelease(urlRef);
 
-        uint64_t id = WKDownloadGetID(download);
+        int64_t total = response ? WKURLResponseGetExpectedContentLength(response) : 0;
+        WKStringRef suggRef = response ? WKURLResponseCopySuggestedFilename(response) : nullptr;
+        std::wstring name = wkStringToWString(suggRef);
+        if (suggRef) WKRelease(suggRef);
+        if (name.empty()) name = L"download.bin";
+
+        std::wstring destPath = getDownloadsFolder() + L"\\" + name;
+        uintptr_t id = reinterpret_cast<uintptr_t>(download);
         DownloadsManager::instance().addDownload(name, destPath, url, total);
     };
 
     dlClient.didReceiveData = [](WKContextRef, WKDownloadRef download, uint64_t length, const void*) {
-        uint64_t id = WKDownloadGetID(download);
+        uintptr_t id = reinterpret_cast<uintptr_t>(download);
         DownloadsManager::instance().updateProgress(id, (int64_t)length, 0);
     };
 
     dlClient.didFinish = [](WKContextRef, WKDownloadRef download, const void*) {
-        uint64_t id = WKDownloadGetID(download);
+        uintptr_t id = reinterpret_cast<uintptr_t>(download);
         DownloadsManager::instance().markCompleted(id);
     };
 
     dlClient.didFail = [](WKContextRef, WKDownloadRef download, WKErrorRef, const void*) {
-        uint64_t id = WKDownloadGetID(download);
+        uintptr_t id = reinterpret_cast<uintptr_t>(download);
         DownloadsManager::instance().markFailed(id);
     };
 
@@ -273,17 +276,16 @@ void WebView::setupNavigationClient() {
 void WebView::setupPolicyClient() {
     if (!m_page) return;
 
-    WKPagePolicyClientV0 policy = {};
-    policy.base.version = 0;
+    WKPagePolicyClientV1 policy = {};
+    policy.base.version = 1;
     policy.base.clientInfo = this;
-    policy.decidePolicyForNavigationResponse = decidePolicyForNavigationResponse;
+    policy.decidePolicyForResponse = decidePolicyForResponse;
 
     WKPageSetPagePolicyClient(m_page, &policy.base);
 }
 
-void WebView::decidePolicyForNavigationResponse(WKPageRef, WKNavigationResponseRef navigationResponse, WKFramePolicyListenerRef listener, WKTypeRef, const void* clientInfo) {
+void WebView::decidePolicyForResponse(WKPageRef, WKFrameRef, WKURLResponseRef response, WKURLRequestRef, bool canShowMIMEType, WKFramePolicyListenerRef listener, WKTypeRef, const void* clientInfo) {
     auto* self = static_cast<WebView*>(const_cast<void*>(clientInfo));
-    WKURLResponseRef response = WKNavigationResponseGetURLResponse(navigationResponse);
     WKStringRef mimeRef = response ? WKURLResponseCopyMIMEType(response) : nullptr;
     std::wstring mime = wkStringToWString(mimeRef);
     if (mimeRef) WKRelease(mimeRef);
@@ -307,7 +309,7 @@ void WebView::decidePolicyForNavigationResponse(WKPageRef, WKNavigationResponseR
         isDownload = true;
     }
 
-    if (!WKNavigationResponseCanShowMIMEType(navigationResponse) || isDownload) {
+    if (!canShowMIMEType || isDownload) {
         WKFramePolicyListenerDownload(listener);
         if (self && self->onDownloadStarted) {
             self->onDownloadStarted();
