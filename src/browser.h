@@ -69,6 +69,7 @@ public:
 
     void toggleSidebar();
     void toggleDownloadsPopover();
+    bool isDownloadsPopoverOpen() const { return m_downloadsPopoverOpen; }
 
     bool isHitInteractive(POINT pt) const;
     HWND window() const { return m_hwnd; }
@@ -148,6 +149,7 @@ private:
     void updateLayout();
     void initData();
     void recordHistory(const std::wstring& title, const std::wstring& url);
+    int findTabIndex(const WebView* view) const;
 
     void paintTopChrome(Gdiplus::Graphics& g, int width);
     void paintTabBar(Gdiplus::Graphics& g);

@@ -171,17 +171,24 @@ HWND WebView::window() const {
 void WebView::setBounds(const RECT& bounds) {
     HWND w = window();
     if (w) {
-        SetWindowPos(w, nullptr,
+        SetWindowPos(w, HWND_TOP,
             bounds.left, bounds.top,
             bounds.right - bounds.left, bounds.bottom - bounds.top,
-            SWP_NOZORDER | SWP_NOACTIVATE);
+            SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        RedrawWindow(w, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
     }
 }
 
 void WebView::setVisible(bool visible) {
     HWND w = window();
     if (w) {
-        ShowWindow(w, visible ? SW_SHOW : SW_HIDE);
+        if (visible) {
+            ShowWindow(w, SW_SHOW);
+            SetWindowPos(w, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            RedrawWindow(w, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN | RDW_ERASE);
+        } else {
+            ShowWindow(w, SW_HIDE);
+        }
     }
 }
 
@@ -327,11 +334,40 @@ void WebView::didStartProvisionalNavigation(WKPageRef, WKNavigationRef, WKTypeRe
     if (self->onNavStateChanged) self->onNavStateChanged();
 }
 
-void WebView::didCommitNavigation(WKPageRef, WKNavigationRef, WKTypeRef, const void* clientInfo) {
+void WebView::didCommitNavigation(WKPageRef page, WKNavigationRef, WKTypeRef, const void* clientInfo) {
     auto* self = static_cast<WebView*>(const_cast<void*>(clientInfo));
     if (self->onUrlChanged) self->onUrlChanged(self->url());
     if (self->onTitleChanged) self->onTitleChanged(self->title());
     if (self->onNavStateChanged) self->onNavStateChanged();
+
+    // Inject H.264 Media compatibility shim so YouTube streams hardware-accelerated H.264/AAC
+    static const char* s_h264Shim =
+        "(function() {"
+        "  if (window.__chronos_media_patched) return;"
+        "  window.__chronos_media_patched = true;"
+        "  var origCanPlay = HTMLMediaElement.prototype.canPlayType;"
+        "  HTMLMediaElement.prototype.canPlayType = function(t) {"
+        "    if (!t) return '';"
+        "    var s = t.toLowerCase();"
+        "    if (s.indexOf('webm') !== -1 || s.indexOf('vp8') !== -1 || s.indexOf('vp9') !== -1 || s.indexOf('av01') !== -1) return '';"
+        "    if (s.indexOf('mp4') !== -1 || s.indexOf('avc1') !== -1 || s.indexOf('h264') !== -1) return 'probably';"
+        "    return origCanPlay ? origCanPlay.call(this, t) : '';"
+        "  };"
+        "  if (window.MediaSource) {"
+        "    var origSupported = MediaSource.isTypeSupported;"
+        "    MediaSource.isTypeSupported = function(t) {"
+        "      if (!t) return false;"
+        "      var s = t.toLowerCase();"
+        "      if (s.indexOf('webm') !== -1 || s.indexOf('vp8') !== -1 || s.indexOf('vp9') !== -1 || s.indexOf('av01') !== -1) return false;"
+        "      if (s.indexOf('mp4') !== -1 || s.indexOf('avc1') !== -1 || s.indexOf('h264') !== -1) return true;"
+        "      return origSupported ? origSupported.call(MediaSource, t) : false;"
+        "    };"
+        "  }"
+        "})();";
+
+    WKStringRef scriptStr = WKStringCreateWithUTF8CString(s_h264Shim);
+    WKPageRunJavaScriptInMainFrame(page, scriptStr, nullptr, nullptr);
+    WKRelease(scriptStr);
 }
 
 void WebView::didFinishNavigation(WKPageRef, WKNavigationRef, WKTypeRef, const void* clientInfo) {

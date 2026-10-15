@@ -138,6 +138,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
         break;
 
+    case WM_TIMER:
+        if (wParam == 2001) {
+            KillTimer(hwnd, 2001);
+            if (g_browser && g_browser->isDownloadsPopoverOpen()) {
+                g_browser->toggleDownloadsPopover();
+            }
+            return 0;
+        }
+        break;
+
     case WM_DESTROY:
         if (g_browser) {
             delete g_browser;
