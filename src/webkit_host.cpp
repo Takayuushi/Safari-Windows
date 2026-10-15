@@ -12,9 +12,10 @@
 #include <WebKit/WKType.h>
 #include <WebKit/WKErrorRef.h>
 #include <WebKit/WKFramePolicyListener.h>
-#include <WebKit/WKNavigationResponse.h>
+#include <WebKit/WKNavigationResponseRef.h>
 #include <WebKit/WKURLResponse.h>
-#include <WebKit/WKDownload.h>
+#include <WebKit/WKDownloadRef.h>
+#include <WebKit/WKContextDownloadClient.h>
 #include <algorithm>
 
 namespace safari {
