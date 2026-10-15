@@ -10,6 +10,7 @@ namespace safari {
 
 enum class DownloadState {
     InProgress,
+    Paused,
     Completed,
     Failed,
     Cancelled
@@ -36,10 +37,14 @@ public:
 
     const std::vector<DownloadItem>& items() const { return m_items; }
 
-    uint64_t addDownload(const std::wstring& filename, const std::wstring& filePath, const std::wstring& url, int64_t totalBytes);
-    void updateProgress(uint64_t id, int64_t receivedBytes, int64_t totalBytes);
+    uint64_t addDownload(uint64_t id, const std::wstring& filename, const std::wstring& filePath, const std::wstring& url, int64_t totalBytes);
+    void updateProgress(uint64_t id, int64_t chunkBytes, int64_t totalBytes);
     void markCompleted(uint64_t id);
     void markFailed(uint64_t id);
+    void cancelDownload(uint64_t id);
+    void pauseDownload(uint64_t id);
+    void resumeDownload(uint64_t id);
+    void removeDownload(uint64_t id);
     void clearCompleted();
 
     bool hasActiveDownloads() const;

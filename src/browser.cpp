@@ -133,6 +133,10 @@ void Browser::createTab(const std::wstring& url) {
     viewPtr->onUrlChanged = [this, viewPtr](const std::wstring& newUrl) {
         int idx = findTabIndex(viewPtr);
         if (idx >= 0 && (size_t)idx < m_tabs.size()) {
+            if (newUrl.starts_with(L"chronos:") || newUrl.starts_with(L"safari:")) {
+                handleInternalUrl((size_t)idx, newUrl);
+                return;
+            }
             m_tabs[idx].url = newUrl;
             if (isWebUrl(newUrl)) {
                 recordHistory(m_tabs[idx].title, newUrl);
@@ -214,20 +218,110 @@ void Browser::closeTab(size_t index) {
     selectTab(m_activeTab);
 }
 
+void Browser::handleInternalUrl(size_t tabIdx, const std::wstring& target) {
+    if (tabIdx >= m_tabs.size() || !m_tabs[tabIdx].webView) return;
+
+    if (target.starts_with(L"chronos:reveal?id=") || target.starts_with(L"safari:reveal?id=")) {
+        size_t eq = target.find(L'=');
+        if (eq != std::wstring::npos) {
+            uint64_t id = _wcstoui64(target.c_str() + eq + 1, nullptr, 10);
+            for (const auto& item : DownloadsManager::instance().items()) {
+                if (item.id == id) {
+                    revealFileInExplorer(item.filePath);
+                    break;
+                }
+            }
+        }
+        m_tabs[tabIdx].title = L"Downloads";
+        m_tabs[tabIdx].url = L"chronos:downloads";
+        m_tabs[tabIdx].webView->loadHtml(getDownloadsPageHtml(), "chronos:downloads");
+        return;
+    }
+    if (target.starts_with(L"chronos:reveal_folder") || target.starts_with(L"safari:reveal_folder")) {
+        revealFileInExplorer(L"");
+        m_tabs[tabIdx].title = L"Downloads";
+        m_tabs[tabIdx].url = L"chronos:downloads";
+        m_tabs[tabIdx].webView->loadHtml(getDownloadsPageHtml(), "chronos:downloads");
+        return;
+    }
+    if (target.starts_with(L"chronos:pause?id=") || target.starts_with(L"safari:pause?id=")) {
+        size_t eq = target.find(L'=');
+        if (eq != std::wstring::npos) {
+            uint64_t id = _wcstoui64(target.c_str() + eq + 1, nullptr, 10);
+            DownloadsManager::instance().pauseDownload(id);
+        }
+        m_tabs[tabIdx].title = L"Downloads";
+        m_tabs[tabIdx].url = L"chronos:downloads";
+        m_tabs[tabIdx].webView->loadHtml(getDownloadsPageHtml(), "chronos:downloads");
+        return;
+    }
+    if (target.starts_with(L"chronos:resume?id=") || target.starts_with(L"safari:resume?id=")) {
+        size_t eq = target.find(L'=');
+        if (eq != std::wstring::npos) {
+            uint64_t id = _wcstoui64(target.c_str() + eq + 1, nullptr, 10);
+            DownloadsManager::instance().resumeDownload(id);
+        }
+        m_tabs[tabIdx].title = L"Downloads";
+        m_tabs[tabIdx].url = L"chronos:downloads";
+        m_tabs[tabIdx].webView->loadHtml(getDownloadsPageHtml(), "chronos:downloads");
+        return;
+    }
+    if (target.starts_with(L"chronos:cancel?id=") || target.starts_with(L"safari:cancel?id=")) {
+        size_t eq = target.find(L'=');
+        if (eq != std::wstring::npos) {
+            uint64_t id = _wcstoui64(target.c_str() + eq + 1, nullptr, 10);
+            DownloadsManager::instance().cancelDownload(id);
+        }
+        m_tabs[tabIdx].title = L"Downloads";
+        m_tabs[tabIdx].url = L"chronos:downloads";
+        m_tabs[tabIdx].webView->loadHtml(getDownloadsPageHtml(), "chronos:downloads");
+        return;
+    }
+    if (target.starts_with(L"chronos:remove?id=") || target.starts_with(L"safari:remove?id=")) {
+        size_t eq = target.find(L'=');
+        if (eq != std::wstring::npos) {
+            uint64_t id = _wcstoui64(target.c_str() + eq + 1, nullptr, 10);
+            DownloadsManager::instance().removeDownload(id);
+        }
+        m_tabs[tabIdx].title = L"Downloads";
+        m_tabs[tabIdx].url = L"chronos:downloads";
+        m_tabs[tabIdx].webView->loadHtml(getDownloadsPageHtml(), "chronos:downloads");
+        return;
+    }
+    if (target == L"chronos:clear" || target == L"safari:clear") {
+        DownloadsManager::instance().clearCompleted();
+        m_tabs[tabIdx].title = L"Downloads";
+        m_tabs[tabIdx].url = L"chronos:downloads";
+        m_tabs[tabIdx].webView->loadHtml(getDownloadsPageHtml(), "chronos:downloads");
+        return;
+    }
+    if (target == L"chronos:start" || target == L"safari:start") {
+        m_tabs[tabIdx].title = L"Start Page";
+        m_tabs[tabIdx].url = target;
+        m_tabs[tabIdx].webView->loadHtml(getStartPageHtml(), "chronos:start");
+        return;
+    }
+    if (target == L"chronos:settings" || target == L"safari:settings") {
+        m_tabs[tabIdx].title = L"Settings";
+        m_tabs[tabIdx].url = target;
+        m_tabs[tabIdx].webView->loadHtml(getSettingsPageHtml(), "chronos:settings");
+        return;
+    }
+    if (target == L"chronos:downloads" || target == L"safari:downloads") {
+        m_tabs[tabIdx].title = L"Downloads";
+        m_tabs[tabIdx].url = target;
+        m_tabs[tabIdx].webView->loadHtml(getDownloadsPageHtml(), "chronos:downloads");
+        return;
+    }
+}
+
 void Browser::navigate(const std::wstring& input) {
     std::wstring target = normalizeInput(input);
     if (m_activeTab < m_tabs.size() && m_tabs[m_activeTab].webView) {
-        m_tabs[m_activeTab].url = target;
-        if (target == L"chronos:start" || target == L"safari:start") {
-            m_tabs[m_activeTab].title = L"Start Page";
-            m_tabs[m_activeTab].webView->loadHtml(getStartPageHtml(), "chronos:start");
-        } else if (target == L"chronos:settings" || target == L"safari:settings") {
-            m_tabs[m_activeTab].title = L"Settings";
-            m_tabs[m_activeTab].webView->loadHtml(getSettingsPageHtml(), "chronos:settings");
-        } else if (target == L"chronos:downloads" || target == L"safari:downloads") {
-            m_tabs[m_activeTab].title = L"Downloads";
-            m_tabs[m_activeTab].webView->loadHtml(getDownloadsPageHtml(), "chronos:downloads");
+        if (target.starts_with(L"chronos:") || target.starts_with(L"safari:")) {
+            handleInternalUrl(m_activeTab, target);
         } else {
+            m_tabs[m_activeTab].url = target;
             m_tabs[m_activeTab].webView->loadUrl(target);
         }
     }
@@ -282,7 +376,7 @@ void Browser::handleResize() {
     int width = client.right - client.left;
     int height = client.bottom - client.top;
 
-    int sidebarWidth = m_sidebarOpen ? 260 : 0;
+    int sidebarWidth = m_sidebarOpen ? m_sidebarWidth : 0;
     int topChromeHeight = 86; // Toolbar 50px + Tab bar 36px
 
     RECT webRect{
@@ -337,8 +431,8 @@ void Browser::updateLayout() {
     size_t count = m_tabs.size();
     if (count > 0) {
         int availWidth = width - 60;
-        int maxTabW = 175;
-        int minTabW = 110;
+        int maxTabW = 240;
+        int minTabW = 120;
         int tabW = std::clamp((availWidth - (int)(count - 1) * 4) / (int)count, minTabW, maxTabW);
         int curX = 12;
 
@@ -355,13 +449,21 @@ void Browser::updateLayout() {
 
     // Sidebar Rectangles
     if (m_sidebarOpen) {
-        m_sidebarRect = RECT{ 0, 86, 260, height };
-        m_segBookmarksRect = RECT{ 12, 96, 88, 124 };
-        m_segReadingRect   = RECT{ 92, 96, 168, 124 };
-        m_segHistoryRect   = RECT{ 172, 96, 248, 124 };
-        m_sidebarSearchRect = RECT{ 12, 132, 248, 160 };
+        int sbW = m_sidebarWidth;
+        m_sidebarRect = RECT{ 0, 86, sbW, height };
+        m_sidebarSplitterRect = RECT{ sbW - 4, 86, sbW + 4, height };
+
+        int totalSegW = sbW - 24;
+        int segW = (totalSegW - 8) / 3;
+        m_segBookmarksRect = RECT{ 12, 96, 12 + segW, 124 };
+        m_segReadingRect   = RECT{ 16 + segW, 96, 16 + segW * 2, 124 };
+        m_segHistoryRect   = RECT{ 20 + segW * 2, 96, sbW - 12, 124 };
+        m_sidebarSearchRect = RECT{ 12, 132, sbW - 12, 160 };
         m_btnClearHistoryRect = RECT{ 14, 166, 120, 186 };
-        m_btnSettings = RECT{ 12, height - 42, 248, height - 10 };
+        m_btnSettings = RECT{ 12, height - 44, sbW - 12, height - 10 };
+    } else {
+        m_sidebarRect = {};
+        m_sidebarSplitterRect = {};
     }
 
     // Downloads Popover
@@ -600,43 +702,50 @@ void Browser::paintTabBar(Gdiplus::Graphics& g) {
 }
 
 void Browser::paintSidebar(Gdiplus::Graphics& g, int height) {
+    int sbW = m_sidebarWidth;
     Gdiplus::SolidBrush sideBg(colors::SidebarBg);
-    g.FillRectangle(&sideBg, 0, 86, 260, height - 86);
+    g.FillRectangle(&sideBg, 0, 86, sbW, height - 86);
 
     Gdiplus::Pen border(colors::SidebarBorder, 1.0f);
-    g.DrawLine(&border, 259, 86, 259, (int)height);
+    g.DrawLine(&border, sbW - 1, 86, sbW - 1, (int)height);
+
+    // Splitter border highlight
+    Gdiplus::Pen splitPen(Gdiplus::Color(45, 255, 255, 255), 1.0f);
+    g.DrawLine(&splitPen, sbW - 2, 86, sbW - 2, (int)height);
 
     // Segment Switcher (Bookmarks / Reading List / History)
+    float totalSegW = (float)(sbW - 24);
+    float segW = (totalSegW - 8.0f) / 3.0f;
     Gdiplus::SolidBrush segBg(colors::SidebarSegment);
-    fillRoundedRect(g, segBg, Gdiplus::RectF(12.0f, 96.0f, 236.0f, 30.0f), 7.0f);
+    fillRoundedRect(g, segBg, Gdiplus::RectF(12.0f, 96.0f, totalSegW, 30.0f), 7.0f);
 
     Gdiplus::SolidBrush activeSeg(colors::SidebarActiveSeg);
     if (m_activeSidebarTab == SidebarTab::Bookmarks) {
-        fillRoundedRect(g, activeSeg, Gdiplus::RectF(14.0f, 98.0f, 76.0f, 26.0f), 5.0f);
+        fillRoundedRect(g, activeSeg, Gdiplus::RectF(14.0f, 98.0f, segW, 26.0f), 5.0f);
     } else if (m_activeSidebarTab == SidebarTab::ReadingList) {
-        fillRoundedRect(g, activeSeg, Gdiplus::RectF(92.0f, 98.0f, 76.0f, 26.0f), 5.0f);
+        fillRoundedRect(g, activeSeg, Gdiplus::RectF(14.0f + segW + 4.0f, 98.0f, segW, 26.0f), 5.0f);
     } else {
-        fillRoundedRect(g, activeSeg, Gdiplus::RectF(170.0f, 98.0f, 76.0f, 26.0f), 5.0f);
+        fillRoundedRect(g, activeSeg, Gdiplus::RectF(14.0f + (segW + 4.0f) * 2.0f, 98.0f, segW, 26.0f), 5.0f);
     }
 
     // Segment Labels
-    Gdiplus::Font segFont(L"Segoe UI Variable Text", 9.0f, Gdiplus::FontStyleBold);
+    Gdiplus::Font segFont(L"Segoe UI Variable Text", 9.5f, Gdiplus::FontStyleBold);
     Gdiplus::SolidBrush textWhite(colors::TextPrimary);
     Gdiplus::SolidBrush textMuted(colors::TextSecondary);
     Gdiplus::StringFormat sfCenter;
     sfCenter.SetAlignment(Gdiplus::StringAlignmentCenter);
     sfCenter.SetLineAlignment(Gdiplus::StringAlignmentCenter);
 
-    g.DrawString(L"Bookmarks", -1, &segFont, Gdiplus::RectF(14.0f, 98.0f, 76.0f, 26.0f), &sfCenter,
+    g.DrawString(L"Bookmarks", -1, &segFont, Gdiplus::RectF(14.0f, 98.0f, segW, 26.0f), &sfCenter,
                  (m_activeSidebarTab == SidebarTab::Bookmarks) ? &textWhite : &textMuted);
-    g.DrawString(L"Reading", -1, &segFont, Gdiplus::RectF(92.0f, 98.0f, 76.0f, 26.0f), &sfCenter,
+    g.DrawString(L"Reading", -1, &segFont, Gdiplus::RectF(14.0f + segW + 4.0f, 98.0f, segW, 26.0f), &sfCenter,
                  (m_activeSidebarTab == SidebarTab::ReadingList) ? &textWhite : &textMuted);
-    g.DrawString(L"History", -1, &segFont, Gdiplus::RectF(170.0f, 98.0f, 76.0f, 26.0f), &sfCenter,
+    g.DrawString(L"History", -1, &segFont, Gdiplus::RectF(14.0f + (segW + 4.0f) * 2.0f, 98.0f, segW, 26.0f), &sfCenter,
                  (m_activeSidebarTab == SidebarTab::History) ? &textWhite : &textMuted);
 
     // Search Box (28px height, modern rounded)
     Gdiplus::SolidBrush searchBg(colors::AddressBg);
-    fillRoundedRect(g, searchBg, Gdiplus::RectF(12.0f, 134.0f, 236.0f, 28.0f), 7.0f);
+    fillRoundedRect(g, searchBg, Gdiplus::RectF(12.0f, 134.0f, (float)(sbW - 24), 28.0f), 7.0f);
 
     Gdiplus::Font searchFont(L"Segoe UI Variable Text", 9.5f, Gdiplus::FontStyleRegular);
     Gdiplus::SolidBrush phBrush(colors::TextMuted);
@@ -662,7 +771,7 @@ void Browser::paintSidebar(Gdiplus::Graphics& g, int height) {
         Gdiplus::SolidBrush blueBrush(colors::AccentBlue);
         Gdiplus::StringFormat sfFar;
         sfFar.SetAlignment(Gdiplus::StringAlignmentFar);
-        g.DrawString(L"Clear History\x2026", -1, &clearFont, Gdiplus::RectF(14.0f, 172.0f, 234.0f, 18.0f), &sfFar, &blueBrush);
+        g.DrawString(L"Clear History\x2026", -1, &clearFont, Gdiplus::RectF(14.0f, 172.0f, (float)(sbW - 28), 18.0f), &sfFar, &blueBrush);
 
         int curY = 196;
         for (const auto& h : m_history) {
@@ -682,7 +791,7 @@ void Browser::paintSidebar(Gdiplus::Graphics& g, int height) {
 
             wchar_t tbuf[32];
             swprintf(tbuf, 32, L"%d:%02d %ls", (h.time.wHour % 12 == 0 ? 12 : h.time.wHour % 12), h.time.wMinute, (h.time.wHour >= 12 ? L"PM" : L"AM"));
-            g.DrawString(tbuf, -1, &subFont, Gdiplus::RectF(14.0f, (float)curY + 4.0f, 234.0f, 20.0f), &sfFar, &textMuted);
+            g.DrawString(tbuf, -1, &subFont, Gdiplus::RectF(14.0f, (float)curY + 4.0f, (float)(sbW - 28), 20.0f), &sfFar, &textMuted);
 
             curY += 30;
         }
@@ -712,7 +821,7 @@ void Browser::paintSidebar(Gdiplus::Graphics& g, int height) {
         for (const auto& r : m_readingList) {
             if (curY > height - 70) break;
             g.DrawString(r.title.c_str(), -1, &itemBoldFont, Gdiplus::PointF(14.0f, (float)curY), &textWhite);
-            g.DrawString(r.excerpt.c_str(), -1, &subFont, Gdiplus::RectF(14.0f, (float)curY + 20.0f, 232.0f, 32.0f), nullptr, &textMuted);
+            g.DrawString(r.excerpt.c_str(), -1, &subFont, Gdiplus::RectF(14.0f, (float)curY + 20.0f, (float)(sbW - 28), 32.0f), nullptr, &textMuted);
             curY += 58;
         }
     }
@@ -728,7 +837,7 @@ void Browser::paintSidebar(Gdiplus::Graphics& g, int height) {
     }
 
     Gdiplus::Pen sepPen(colors::SidebarBorder, 1.0f);
-    g.DrawLine(&sepPen, 12, (int)m_btnSettings.top - 6, 248, (int)m_btnSettings.top - 6);
+    g.DrawLine(&sepPen, 12, (int)m_btnSettings.top - 6, sbW - 12, (int)m_btnSettings.top - 6);
 
     Gdiplus::Font gearFont(L"Segoe UI Symbol", 11.5f, Gdiplus::FontStyleRegular);
     g.DrawString(L"\x2699", -1, &gearFont, Gdiplus::PointF(setBtnF.X + 8.0f, setBtnF.Y + 4.0f), &textWhite);
@@ -793,11 +902,38 @@ void Browser::paintDownloadsPopup(HDC hdc) {
 
             wchar_t sbuf[64];
             if (item.state == DownloadState::Completed) {
-                swprintf(sbuf, 64, L"Completed \x2022 %.1f MB", item.totalBytes / 1048576.0);
+                swprintf(sbuf, 64, L"Completed \x2022 %.1f MB", (item.totalBytes > 0 ? item.totalBytes : item.receivedBytes) / 1048576.0);
+            } else if (item.state == DownloadState::InProgress) {
+                if (item.totalBytes > 0) {
+                    double pct = (double)item.receivedBytes / (double)item.totalBytes * 100.0;
+                    swprintf(sbuf, 64, L"Downloading\x2026 %.1f / %.1f MB (%.0f%%)", item.receivedBytes / 1048576.0, item.totalBytes / 1048576.0, pct);
+                } else {
+                    swprintf(sbuf, 64, L"Downloading\x2026 %.1f MB", item.receivedBytes / 1048576.0);
+                }
+            } else if (item.state == DownloadState::Paused) {
+                swprintf(sbuf, 64, L"Paused \x2022 %.1f MB", item.receivedBytes / 1048576.0);
+            } else if (item.state == DownloadState::Cancelled) {
+                swprintf(sbuf, 64, L"Cancelled");
             } else {
-                swprintf(sbuf, 64, L"Downloading\x2026 %.1f MB", item.receivedBytes / 1048576.0);
+                swprintf(sbuf, 64, L"Failed");
             }
-            g.DrawString(sbuf, -1, &sizeFont, Gdiplus::PointF(46.0f, (float)curY + 26.0f), &subBrush);
+            g.DrawString(sbuf, -1, &sizeFont, Gdiplus::PointF(46.0f, (float)curY + 24.0f), &subBrush);
+
+            // Mini progress bar for in-progress or paused downloads
+            if (item.state == DownloadState::InProgress || item.state == DownloadState::Paused) {
+                float barW = (float)popWidth - 110.0f;
+                float pct = 0.0f;
+                if (item.totalBytes > 0) {
+                    pct = (float)((double)item.receivedBytes / (double)item.totalBytes);
+                    if (pct > 1.0f) pct = 1.0f;
+                }
+                Gdiplus::SolidBrush barBg(Gdiplus::Color(255, 60, 60, 66));
+                fillRoundedRect(g, barBg, Gdiplus::RectF(46.0f, (float)curY + 38.0f, barW, 3.0f), 1.5f);
+                if (pct > 0.0f) {
+                    Gdiplus::SolidBrush barFill(item.state == DownloadState::Paused ? Gdiplus::Color(255, 255, 159, 10) : colors::AccentBlue);
+                    fillRoundedRect(g, barFill, Gdiplus::RectF(46.0f, (float)curY + 38.0f, barW * pct, 3.0f), 1.5f);
+                }
+            }
 
             g.DrawEllipse(&docPen, (float)popWidth - 38.0f, (float)curY + 16.0f, 10.0f, 10.0f);
             g.DrawLine(&docPen, (float)popWidth - 31.0f, (float)curY + 23.0f, (float)popWidth - 27.0f, (float)curY + 27.0f);
@@ -891,6 +1027,16 @@ LRESULT CALLBACK Browser::downloadsPopupProc(HWND hwnd, UINT msg, WPARAM wParam,
 }
 
 void Browser::onMouseMove(POINT pt) {
+    m_lastMousePos = pt;
+
+    if (m_isDraggingSidebar) {
+        SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
+        m_sidebarWidth = std::clamp((int)pt.x, 240, 560);
+        handleResize();
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+        return;
+    }
+
     m_hoverTraffic = 0;
     if (PtInRect(&m_btnTrafficClose, pt)) m_hoverTraffic = 1;
     else if (PtInRect(&m_btnTrafficMin, pt)) m_hoverTraffic = 2;
@@ -931,6 +1077,14 @@ void Browser::onMouseDown(POINT pt) {
     }
     if (PtInRect(&m_btnTrafficMax, pt)) {
         ShowWindow(m_hwnd, IsZoomed(m_hwnd) ? SW_RESTORE : SW_MAXIMIZE);
+        return;
+    }
+
+    // Sidebar splitter drag
+    if (m_sidebarOpen && PtInRect(&m_sidebarSplitterRect, pt)) {
+        m_isDraggingSidebar = true;
+        SetCapture(m_hwnd);
+        SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
         return;
     }
 
@@ -1047,7 +1201,7 @@ void Browser::onMouseDown(POINT pt) {
         if (m_activeSidebarTab == SidebarTab::Bookmarks) {
             int curY = 168;
             for (const auto& b : m_bookmarks) {
-                RECT r{ 12, curY, 248, curY + 30 };
+                RECT r{ 12, curY, m_sidebarWidth - 12, curY + 30 };
                 if (PtInRect(&r, pt)) {
                     navigate(b.url);
                     return;
@@ -1057,7 +1211,7 @@ void Browser::onMouseDown(POINT pt) {
         } else if (m_activeSidebarTab == SidebarTab::History) {
             int curY = 192;
             for (const auto& h : m_history) {
-                RECT r{ 12, curY, 248, curY + 22 };
+                RECT r{ 12, curY, m_sidebarWidth - 12, curY + 22 };
                 if (PtInRect(&r, pt)) {
                     navigate(h.url);
                     return;
@@ -1084,6 +1238,11 @@ void Browser::onMouseDown(POINT pt) {
 }
 
 void Browser::onMouseUp(POINT) {
+    if (m_isDraggingSidebar) {
+        m_isDraggingSidebar = false;
+        ReleaseCapture();
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+    }
 }
 
 void Browser::onMouseLeave() {
@@ -1095,6 +1254,14 @@ void Browser::onMouseLeave() {
     m_hoverTab = -1;
     m_hoverTabClose = -1;
     InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+bool Browser::onSetCursor() {
+    if (m_isDraggingSidebar || (m_sidebarOpen && PtInRect(&m_sidebarSplitterRect, m_lastMousePos))) {
+        SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
+        return true;
+    }
+    return false;
 }
 
 bool Browser::onKeyDown(WPARAM key) {
@@ -1142,8 +1309,8 @@ bool Browser::isHitInteractive(POINT pt) const {
     // Downloads Popover
     if (m_downloadsPopoverOpen && PtInRect(&m_downloadsPopoverRect, pt)) return true;
 
-    // Sidebar
-    if (m_sidebarOpen && PtInRect(&m_sidebarRect, pt)) return true;
+    // Sidebar & Splitter
+    if (m_sidebarOpen && (PtInRect(&m_sidebarRect, pt) || PtInRect(&m_sidebarSplitterRect, pt))) return true;
 
     return false;
 }

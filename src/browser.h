@@ -72,6 +72,7 @@ public:
     bool isDownloadsPopoverOpen() const { return m_downloadsPopoverOpen; }
 
     bool isHitInteractive(POINT pt) const;
+    bool onSetCursor();
     HWND window() const { return m_hwnd; }
 
 private:
@@ -146,9 +147,16 @@ private:
     int m_hoverTabClose = -1;
     bool m_hoverNewTabInBar = false;
 
+    // Sidebar state
+    int m_sidebarWidth = 320;
+    bool m_isDraggingSidebar = false;
+    POINT m_lastMousePos{};
+    RECT m_sidebarSplitterRect{};
+
     void updateLayout();
     void initData();
     void recordHistory(const std::wstring& title, const std::wstring& url);
+    void handleInternalUrl(size_t tabIdx, const std::wstring& target);
     int findTabIndex(const WebView* view) const;
 
     void paintTopChrome(Gdiplus::Graphics& g, int width);

@@ -83,7 +83,8 @@ bool WebKitHost::initialize() {
         if (name.empty()) name = L"download.bin";
 
         std::wstring destPath = getDownloadsFolder() + L"\\" + name;
-        DownloadsManager::instance().addDownload(name, destPath, url, total);
+        uintptr_t id = reinterpret_cast<uintptr_t>(download);
+        DownloadsManager::instance().addDownload(id, name, destPath, url, total);
     };
 
     dlClient.didReceiveData = [](WKContextRef, WKDownloadRef download, uint64_t length, const void*) {
@@ -141,9 +142,9 @@ bool WebView::create(HWND parent, const RECT& bounds) {
 
     m_page = WKViewGetPage(m_view);
 
-    // Authentic macOS Safari User-Agent for seamless web compatibility and HTML5 media playback
+    // Desktop User-Agent for seamless YouTube HTML5 video playback
     WKStringRef ua = WKStringCreateWithUTF8CString(
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
     );
     WKPageSetCustomUserAgent(m_page, ua);
     WKRelease(ua);
@@ -255,6 +256,9 @@ std::wstring WebView::title() const {
 std::wstring WebView::url() const {
     if (!m_page) return {};
     WKURLRef urlRef = WKPageCopyActiveURL(m_page);
+    if (!urlRef) {
+        urlRef = WKPageCopyProvisionalURL(m_page);
+    }
     if (!urlRef) return {};
     WKStringRef strRef = WKURLCopyString(urlRef);
     std::wstring result = wkStringToWString(strRef);
@@ -325,11 +329,24 @@ void WebView::decidePolicyForResponse(WKPageRef, WKFrameRef, WKURLResponseRef re
     }
 }
 
-void WebView::didStartProvisionalNavigation(WKPageRef, WKNavigationRef, WKTypeRef, const void* clientInfo) {
+void WebView::didStartProvisionalNavigation(WKPageRef page, WKNavigationRef, WKTypeRef, const void* clientInfo) {
     auto* self = static_cast<WebView*>(const_cast<void*>(clientInfo));
     self->m_isLoading = true;
     if (self->onLoadingChanged) self->onLoadingChanged(true);
-    if (self->onUrlChanged) self->onUrlChanged(self->url());
+
+    WKURLRef provRef = WKPageCopyProvisionalURL(page);
+    if (provRef) {
+        WKStringRef strRef = WKURLCopyString(provRef);
+        std::wstring provUrl = wkStringToWString(strRef);
+        if (strRef) WKRelease(strRef);
+        WKRelease(provRef);
+        if (!provUrl.empty() && self->onUrlChanged) {
+            self->onUrlChanged(provUrl);
+        }
+    } else {
+        if (self->onUrlChanged) self->onUrlChanged(self->url());
+    }
+
     if (self->onNavStateChanged) self->onNavStateChanged();
 }
 

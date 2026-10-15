@@ -16,53 +16,53 @@ inline std::string getSettingsPageHtml() {
   *{box-sizing:border-box}
   html,body{margin:0;min-height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;color:#f5f5f7;background:#1e1e22;user-select:none}
   
-  .window{display:flex;flex-direction:column;max-width:820px;margin:28px auto 40px;background:#25252a;border-radius:14px;border:1px solid rgba(255,255,255,0.08);box-shadow:0 18px 45px rgba(0,0,0,0.45);overflow:hidden}
+  .window{display:flex;flex-direction:column;max-width:980px;margin:32px auto 48px;background:#25252a;border-radius:16px;border:1px solid rgba(255,255,255,0.08);box-shadow:0 24px 60px rgba(0,0,0,0.5);overflow:hidden}
   
   /* App Header Banner */
-  .app-banner{display:flex;align-items:center;gap:16px;padding:18px 28px;background:linear-gradient(180deg,#2b2b32,#232328);border-bottom:1px solid rgba(255,255,255,0.07)}
-  .app-banner img{width:46px;height:46px;object-fit:contain}
-  .app-banner-info h2{margin:0 0 2px;font-size:17px;font-weight:700;color:#fff}
-  .app-banner-info p{margin:0;font-size:12px;color:#8e8e93}
+  .app-banner{display:flex;align-items:center;gap:18px;padding:22px 34px;background:linear-gradient(180deg,#2b2b32,#232328);border-bottom:1px solid rgba(255,255,255,0.07)}
+  .app-banner img{width:52px;height:52px;object-fit:contain}
+  .app-banner-info h2{margin:0 0 3px;font-size:19px;font-weight:700;color:#fff;letter-spacing:-0.2px}
+  .app-banner-info p{margin:0;font-size:13px;color:#8e8e93}
 
   /* macOS Segmented Settings Toolbar */
-  .toolbar{display:flex;align-items:center;justify-content:center;gap:2px;background:#202024;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.06);overflow-x:auto}
-  .tab-btn{display:flex;flex-direction:column;align-items:center;gap:4px;background:transparent;border:0;color:#8e8e93;padding:6px 12px;border-radius:8px;cursor:pointer;font-size:11px;font-weight:500;transition:all .15s ease;white-space:nowrap}
-  .tab-btn svg{width:18px;height:18px;fill:currentColor}
+  .toolbar{display:flex;align-items:center;justify-content:center;gap:4px;background:#202024;padding:10px 16px;border-bottom:1px solid rgba(255,255,255,0.06);overflow-x:auto}
+  .tab-btn{display:flex;flex-direction:column;align-items:center;gap:5px;background:transparent;border:0;color:#8e8e93;padding:8px 14px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:500;transition:all .15s ease;white-space:nowrap}
+  .tab-btn svg{width:20px;height:20px;fill:currentColor}
   .tab-btn:hover{color:#f5f5f7;background:rgba(255,255,255,0.05)}
   .tab-btn.active{color:#fff;background:#383840;box-shadow:0 1px 3px rgba(0,0,0,0.3)}
   .tab-btn.active svg{fill:#2997ff}
 
   /* Content Area */
-  .content{padding:26px 32px 36px;display:none;animation:fadeIn .15s ease}
+  .content{padding:30px 38px 42px;display:none;animation:fadeIn .15s ease}
   .content.active{display:block}
   @keyframes fadeIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
 
-  h3{font-size:16px;font-weight:600;margin:0 0 16px;color:#f5f5f7}
-  .group{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07);border-radius:10px;margin-bottom:20px;overflow:hidden}
-  .row{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.04)}
+  h3{font-size:18px;font-weight:600;margin:0 0 20px;color:#f5f5f7}
+  .group{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07);border-radius:12px;margin-bottom:24px;overflow:hidden}
+  .row{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid rgba(255,255,255,0.04)}
   .row:last-child{border-bottom:0}
   
-  .label-group{display:flex;flex-direction:column;gap:2px;max-width:480px}
-  .label{font-size:13px;font-weight:500;color:#f5f5f7}
-  .desc{font-size:11.5px;color:#8e8e93;line-height:1.4}
+  .label-group{display:flex;flex-direction:column;gap:3px;max-width:560px}
+  .label{font-size:14px;font-weight:500;color:#f5f5f7}
+  .desc{font-size:12.5px;color:#8e8e93;line-height:1.4}
 
-  select,input[type="text"]{background:#1a1a1d;color:#f5f5f7;border:1px solid rgba(255,255,255,0.12);border-radius:6px;padding:6px 10px;font-size:12px;outline:none}
+  select,input[type="text"]{background:#1a1a1d;color:#f5f5f7;border:1px solid rgba(255,255,255,0.12);border-radius:7px;padding:7px 12px;font-size:13px;outline:none}
   select:focus,input[type="text"]:focus{border-color:#2997ff}
 
   /* macOS Switch */
-  .switch{position:relative;display:inline-block;width:38px;height:22px;flex-shrink:0}
+  .switch{position:relative;display:inline-block;width:42px;height:24px;flex-shrink:0}
   .switch input{opacity:0;width:0;height:0}
-  .slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background-color:#3a3a3e;transition:.2s;border-radius:22px}
-  .slider:before{position:absolute;content:"";height:18px;width:18px;left:2px;bottom:2px;background-color:white;transition:.2s;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,0.3)}
+  .slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background-color:#3a3a3e;transition:.2s;border-radius:24px}
+  .slider:before{position:absolute;content:"";height:20px;width:20px;left:2px;bottom:2px;background-color:white;transition:.2s;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,0.3)}
   input:checked + .slider{background-color:#34c759}
-  input:checked + .slider:before{transform:translateX(16px)}
+  input:checked + .slider:before{transform:translateX(18px)}
 
-  .btn-action{background:#383840;color:#f5f5f7;border:1px solid rgba(255,255,255,0.1);padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer}
+  .btn-action{background:#383840;color:#f5f5f7;border:1px solid rgba(255,255,255,0.1);padding:7px 16px;border-radius:7px;font-size:13px;cursor:pointer;font-weight:500}
   .btn-action:hover{background:#484852}
   .btn-danger{background:#d70015;color:#fff;border:0}
   .btn-danger:hover{background:#b80012}
 
-  .badge{display:inline-flex;align-items:center;gap:6px;background:rgba(41,151,255,0.12);color:#2997ff;padding:4px 10px;border-radius:6px;font-size:11.5px;font-weight:600}
+  .badge{display:inline-flex;align-items:center;gap:6px;background:rgba(41,151,255,0.12);color:#2997ff;padding:5px 12px;border-radius:7px;font-size:12px;font-weight:600}
 </style>
 </head>
 <body>

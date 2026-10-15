@@ -14,9 +14,9 @@ void DownloadsManager::notify() {
     }
 }
 
-uint64_t DownloadsManager::addDownload(const std::wstring& filename, const std::wstring& filePath, const std::wstring& url, int64_t totalBytes) {
+uint64_t DownloadsManager::addDownload(uint64_t id, const std::wstring& filename, const std::wstring& filePath, const std::wstring& url, int64_t totalBytes) {
     DownloadItem item;
-    item.id = m_nextId++;
+    item.id = id;
     item.filename = filename;
     item.filePath = filePath;
     item.url = url;
@@ -29,10 +29,10 @@ uint64_t DownloadsManager::addDownload(const std::wstring& filename, const std::
     return item.id;
 }
 
-void DownloadsManager::updateProgress(uint64_t id, int64_t receivedBytes, int64_t totalBytes) {
+void DownloadsManager::updateProgress(uint64_t id, int64_t chunkBytes, int64_t totalBytes) {
     for (auto& item : m_items) {
         if (item.id == id) {
-            item.receivedBytes = receivedBytes;
+            item.receivedBytes += chunkBytes;
             if (totalBytes > 0) item.totalBytes = totalBytes;
             notify();
             break;
@@ -44,7 +44,7 @@ void DownloadsManager::markCompleted(uint64_t id) {
     for (auto& item : m_items) {
         if (item.id == id) {
             item.state = DownloadState::Completed;
-            item.receivedBytes = item.totalBytes;
+            if (item.totalBytes > 0) item.receivedBytes = item.totalBytes;
             notify();
             break;
         }
@@ -61,9 +61,46 @@ void DownloadsManager::markFailed(uint64_t id) {
     }
 }
 
+void DownloadsManager::cancelDownload(uint64_t id) {
+    for (auto& item : m_items) {
+        if (item.id == id) {
+            item.state = DownloadState::Cancelled;
+            notify();
+            break;
+        }
+    }
+}
+
+void DownloadsManager::pauseDownload(uint64_t id) {
+    for (auto& item : m_items) {
+        if (item.id == id && item.state == DownloadState::InProgress) {
+            item.state = DownloadState::Paused;
+            notify();
+            break;
+        }
+    }
+}
+
+void DownloadsManager::resumeDownload(uint64_t id) {
+    for (auto& item : m_items) {
+        if (item.id == id && item.state == DownloadState::Paused) {
+            item.state = DownloadState::InProgress;
+            notify();
+            break;
+        }
+    }
+}
+
+void DownloadsManager::removeDownload(uint64_t id) {
+    m_items.erase(std::remove_if(m_items.begin(), m_items.end(), [id](const DownloadItem& item) {
+        return item.id == id;
+    }), m_items.end());
+    notify();
+}
+
 void DownloadsManager::clearCompleted() {
     m_items.erase(std::remove_if(m_items.begin(), m_items.end(), [](const DownloadItem& item) {
-        return item.state != DownloadState::InProgress;
+        return item.state != DownloadState::InProgress && item.state != DownloadState::Paused;
     }), m_items.end());
     notify();
 }

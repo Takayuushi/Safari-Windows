@@ -132,6 +132,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
         return 0;
 
+    case WM_SETCURSOR: {
+        if (g_browser && g_browser->onSetCursor()) {
+            return TRUE;
+        }
+        break;
+    }
+
     case WM_KEYDOWN:
         if (g_browser && g_browser->onKeyDown(wParam)) {
             return 0;
