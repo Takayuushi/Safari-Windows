@@ -1,11 +1,18 @@
 #include <windows.h>
 #include <dwmapi.h>
 #include <uxtheme.h>
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mfreadwrite.h>
 #include "browser.h"
 #include "util.h"
 
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "uxtheme.lib")
+#pragma comment(lib, "mfplat.lib")
+#pragma comment(lib, "mf.lib")
+#pragma comment(lib, "mfuuid.lib")
+#pragma comment(lib, "ole32.lib")
 
 static safari::Browser* g_browser = nullptr;
 
@@ -145,13 +152,30 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    MFStartup(MF_VERSION, MFSTARTUP_FULL);
     safari::initGdiplus();
+
+    // Load application icon from app.ico if present
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    wchar_t* lastSlash = wcsrchr(exePath, L'\\');
+    HICON hIconBig = nullptr;
+    HICON hIconSmall = nullptr;
+    if (lastSlash) {
+        *lastSlash = L'\0';
+        std::wstring icoPath = std::wstring(exePath) + L"\\app.ico";
+        hIconBig = (HICON)LoadImageW(nullptr, icoPath.c_str(), IMAGE_ICON, 256, 256, LR_LOADFROMFILE);
+        hIconSmall = (HICON)LoadImageW(nullptr, icoPath.c_str(), IMAGE_ICON, 32, 32, LR_LOADFROMFILE);
+    }
 
     WNDCLASSEXW wc = { sizeof(WNDCLASSEXW) };
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
     wc.lpszClassName = L"ChronosCompassWindowClass";
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.hIcon = hIconBig;
+    wc.hIconSm = hIconSmall;
     wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
     wc.style = CS_HREDRAW | CS_VREDRAW;
 
@@ -167,8 +191,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
 
     if (!hwnd) {
         safari::shutdownGdiplus();
+        MFShutdown();
+        CoUninitialize();
         return 1;
     }
+
+    if (hIconBig) SendMessageW(hwnd, WM_SETICON, ICON_BIG, (LPARAM)hIconBig);
+    if (hIconSmall) SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)hIconSmall);
 
     ShowWindow(hwnd, nCmdShow);
     UpdateWindow(hwnd);
@@ -180,5 +209,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
     }
 
     safari::shutdownGdiplus();
+    MFShutdown();
+    CoUninitialize();
     return (int)msg.wParam;
 }

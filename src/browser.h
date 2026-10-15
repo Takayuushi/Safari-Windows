@@ -152,10 +152,14 @@ private:
     void paintTopChrome(Gdiplus::Graphics& g, int width);
     void paintTabBar(Gdiplus::Graphics& g);
     void paintSidebar(Gdiplus::Graphics& g, int height);
-    void paintDownloadsPopover(Gdiplus::Graphics& g);
+
+    HWND m_hwndDownloadsPopup = nullptr;
+    void paintDownloadsPopup(HDC hdc);
+    void onDownloadsPopupClick(POINT pt);
 
     static LRESULT CALLBACK editSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
     static LRESULT CALLBACK searchSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+    static LRESULT CALLBACK downloadsPopupProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 };
 
 } // namespace safari

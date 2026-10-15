@@ -1,11 +1,12 @@
 #pragma once
 
 #include <string>
+#include "logo_data.h"
 
 namespace safari {
 
 inline std::string getStartPageHtml() {
-    return R"HTML(<!doctype html>
+    std::string html = R"HTML(<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -16,18 +17,17 @@ inline std::string getStartPageHtml() {
   html,body{margin:0;min-height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;color:#f5f5f7}
   body{
     background:
-      radial-gradient(1100px 640px at 18% -8%,rgba(76,201,176,.2),transparent 62%),
-      radial-gradient(900px 560px at 92% 0%,rgba(110,120,230,.18),transparent 58%),
+      radial-gradient(1100px 640px at 18% -8%,rgba(76,201,176,.15),transparent 62%),
+      radial-gradient(900px 560px at 92% 0%,rgba(110,120,230,.14),transparent 58%),
       linear-gradient(180deg,#242428,#161619);
     background-attachment:fixed;
     display:flex;flex-direction:column;align-items:center;padding:50px 24px;
   }
   .container{max-width:820px;width:100%}
-  .app-header{display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:34px}
-  .compass-icon{width:64px;height:64px;border-radius:18px;background:linear-gradient(135deg,#007aff,#0040dd);display:grid;place-items:center;box-shadow:0 6px 18px rgba(0,122,255,0.35)}
-  .compass-icon svg{width:38px;height:38px;fill:#fff}
-  .app-title{font-size:24px;font-weight:700;letter-spacing:-.02em;color:#f5f5f7;margin:0}
-  .app-sub{font-size:12px;color:#8e8e93;letter-spacing:.04em;text-transform:uppercase}
+  .app-header{display:flex;flex-direction:column;align-items:center;gap:10px;margin-bottom:34px}
+  .chronos-logo{width:88px;height:88px;object-fit:contain;filter:drop-shadow(0 8px 24px rgba(0,0,0,0.5))}
+  .app-title{font-size:26px;font-weight:700;letter-spacing:-.02em;color:#f5f5f7;margin:0}
+  .app-sub{font-size:12px;color:#8e8e93;letter-spacing:.06em;text-transform:uppercase}
 
   h2{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0 0 20px;color:#f5f5f7}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:24px 16px}
@@ -46,12 +46,11 @@ inline std::string getStartPageHtml() {
 <body>
 <div class="container">
   <div class="app-header">
-    <div class="compass-icon">
-      <!-- Compass Star SVG -->
-      <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-14l2.5 5.5L19 11l-5.5 2.5L11 19l-2.5-5.5L3 11l5.5-2.5L11 6z"/></svg>
-    </div>
+    <img class="chronos-logo" src="data:image/png;base64,)HTML";
+    html += getChronosLogoBase64();
+    html += R"HTML(" alt="Chronos Compass Logo">
     <h1 class="app-title">Chronos Compass</h1>
-    <div class="app-sub">Compass &bull; Apple WebKit</div>
+    <div class="app-sub">Apple WebKit Engine</div>
   </div>
 
   <h2>Favorites</h2>
@@ -78,6 +77,7 @@ inline std::string getStartPageHtml() {
 </div>
 </body>
 </html>)HTML";
+    return html;
 }
 
 } // namespace safari

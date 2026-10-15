@@ -56,6 +56,10 @@ target_link_libraries(Chronos PRIVATE
     shell32
     comdlg32
     advapi32
+    ole32
+    mfplat
+    mf
+    mfuuid
 )
 
 if (MSVC)

@@ -12,6 +12,10 @@ namespace safari {
 Browser::Browser() = default;
 
 Browser::~Browser() {
+    if (m_hwndDownloadsPopup && IsWindow(m_hwndDownloadsPopup)) {
+        DestroyWindow(m_hwndDownloadsPopup);
+        m_hwndDownloadsPopup = nullptr;
+    }
     for (auto& tab : m_tabs) {
         if (tab.webView) {
             tab.webView->destroy();
@@ -42,7 +46,28 @@ bool Browser::initialize(HWND hwnd) {
     // Hook downloads listener
     DownloadsManager::instance().setChangeListener([this]() {
         if (m_hwnd) InvalidateRect(m_hwnd, nullptr, FALSE);
+        if (m_hwndDownloadsPopup && IsWindowVisible(m_hwndDownloadsPopup)) {
+            InvalidateRect(m_hwndDownloadsPopup, nullptr, TRUE);
+        }
     });
+
+    // Register and create floating downloads popup window
+    WNDCLASSEXW pc = { sizeof(WNDCLASSEXW) };
+    pc.lpfnWndProc = downloadsPopupProc;
+    pc.hInstance = GetModuleHandle(nullptr);
+    pc.lpszClassName = L"ChronosDownloadsPopupClass";
+    pc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    pc.hbrBackground = (HBRUSH)GetStockObject(NULL_BRUSH);
+    pc.style = CS_DROPSHADOW | CS_HREDRAW | CS_VREDRAW;
+    RegisterClassExW(&pc);
+
+    m_hwndDownloadsPopup = CreateWindowExW(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+        pc.lpszClassName,
+        L"",
+        WS_POPUP | WS_CLIPSIBLINGS,
+        0, 0, 320, 320,
+        m_hwnd, nullptr, GetModuleHandle(nullptr), this);
 
     // Create Address Bar Edit Control (hidden initially, shown on click)
     m_editAddress = CreateWindowExW(
@@ -112,8 +137,11 @@ void Browser::createTab(const std::wstring& url) {
     };
 
     viewPtr->onDownloadStarted = [this]() {
-        m_downloadsPopoverOpen = true;
-        InvalidateRect(m_hwnd, nullptr, FALSE);
+        if (!m_downloadsPopoverOpen) {
+            toggleDownloadsPopover();
+        } else if (m_hwndDownloadsPopup) {
+            InvalidateRect(m_hwndDownloadsPopup, nullptr, TRUE);
+        }
     };
 
     if (url == L"chronos:start" || url == L"safari:start") {
@@ -207,6 +235,17 @@ void Browser::toggleSidebar() {
 
 void Browser::toggleDownloadsPopover() {
     m_downloadsPopoverOpen = !m_downloadsPopoverOpen;
+    if (m_hwndDownloadsPopup) {
+        if (m_downloadsPopoverOpen) {
+            POINT pt{ m_btnDownloads.left - 240, 50 };
+            ClientToScreen(m_hwnd, &pt);
+            SetWindowPos(m_hwndDownloadsPopup, HWND_TOPMOST, pt.x, pt.y, 320, 320, SWP_SHOWWINDOW);
+            SetFocus(m_hwndDownloadsPopup);
+            InvalidateRect(m_hwndDownloadsPopup, nullptr, TRUE);
+        } else {
+            ShowWindow(m_hwndDownloadsPopup, SW_HIDE);
+        }
+    }
     InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
@@ -329,10 +368,6 @@ void Browser::paint(HDC hdc) {
         paintSidebar(g, height);
     }
 
-    if (m_downloadsPopoverOpen) {
-        paintDownloadsPopover(g);
-    }
-
     BitBlt(hdc, 0, 0, width, height, memDC, 0, 0, SRCCOPY);
     SelectObject(memDC, oldBmp);
     DeleteObject(memBmp);
@@ -440,8 +475,13 @@ void Browser::paintTopChrome(Gdiplus::Graphics& g, int width) {
     g.DrawLine(&dlPen, (int)m_btnNewTabToolbar.left + 16, (int)m_btnNewTabToolbar.top + 10, (int)m_btnNewTabToolbar.left + 16, (int)m_btnNewTabToolbar.top + 22);
     g.DrawLine(&dlPen, (int)m_btnNewTabToolbar.left + 10, (int)m_btnNewTabToolbar.top + 16, (int)m_btnNewTabToolbar.left + 22, (int)m_btnNewTabToolbar.top + 16);
 
-    // Overview Button (Grid)
-    g.DrawRectangle(&dlPen, (int)m_btnOverview.left + 8, (int)m_btnOverview.top + 8, 14, 14);
+    // Overview Button (Show All Tabs - Safari Two Overlapping Cards)
+    Gdiplus::Pen ovPen(m_hoverOverview ? colors::TextPrimary : colors::TextSecondary, 1.4f);
+    Gdiplus::SolidBrush ovBg(colors::ChromeBg);
+    fillRoundedRect(g, ovBg, Gdiplus::RectF((float)m_btnOverview.left + 7.0f, (float)m_btnOverview.top + 9.0f, 13.0f, 11.0f), 2.0f);
+    drawRoundedRect(g, ovPen, Gdiplus::RectF((float)m_btnOverview.left + 7.0f, (float)m_btnOverview.top + 9.0f, 13.0f, 11.0f), 2.0f);
+    fillRoundedRect(g, ovBg, Gdiplus::RectF((float)m_btnOverview.left + 12.0f, (float)m_btnOverview.top + 13.0f, 13.0f, 11.0f), 2.0f);
+    drawRoundedRect(g, ovPen, Gdiplus::RectF((float)m_btnOverview.left + 12.0f, (float)m_btnOverview.top + 13.0f, 13.0f, 11.0f), 2.0f);
 }
 
 void Browser::paintTabBar(Gdiplus::Graphics& g) {
@@ -516,86 +556,112 @@ void Browser::paintSidebar(Gdiplus::Graphics& g, int height) {
 
     // Segment Switcher (Bookmarks / Reading List / History)
     Gdiplus::SolidBrush segBg(colors::SidebarSegment);
-    fillRoundedRect(g, segBg, Gdiplus::RectF(12.0f, 96.0f, 236.0f, 28.0f), 7.0f);
+    fillRoundedRect(g, segBg, Gdiplus::RectF(12.0f, 96.0f, 236.0f, 30.0f), 7.0f);
 
     Gdiplus::SolidBrush activeSeg(colors::SidebarActiveSeg);
     if (m_activeSidebarTab == SidebarTab::Bookmarks) {
-        fillRoundedRect(g, activeSeg, Gdiplus::RectF(14.0f, 98.0f, 76.0f, 24.0f), 5.0f);
+        fillRoundedRect(g, activeSeg, Gdiplus::RectF(14.0f, 98.0f, 76.0f, 26.0f), 5.0f);
     } else if (m_activeSidebarTab == SidebarTab::ReadingList) {
-        fillRoundedRect(g, activeSeg, Gdiplus::RectF(92.0f, 98.0f, 76.0f, 24.0f), 5.0f);
+        fillRoundedRect(g, activeSeg, Gdiplus::RectF(92.0f, 98.0f, 76.0f, 26.0f), 5.0f);
     } else {
-        fillRoundedRect(g, activeSeg, Gdiplus::RectF(170.0f, 98.0f, 76.0f, 24.0f), 5.0f);
+        fillRoundedRect(g, activeSeg, Gdiplus::RectF(170.0f, 98.0f, 76.0f, 26.0f), 5.0f);
     }
 
-    // Segment Icons
-    Gdiplus::Pen segPen(colors::TextPrimary, 1.5f);
-    // Ribbon Bookmark
-    g.DrawRectangle(&segPen, 46, 104, 10, 12);
-    // Eyeglasses
-    g.DrawEllipse(&segPen, 120, 107, 7, 7);
-    g.DrawEllipse(&segPen, 131, 107, 7, 7);
-    g.DrawLine(&segPen, 127, 110, 131, 110);
-    // Clock
-    g.DrawEllipse(&segPen, 202, 104, 12, 12);
-    g.DrawLine(&segPen, 208, 107, 208, 110);
-    g.DrawLine(&segPen, 208, 110, 212, 110);
+    // Segment Labels
+    Gdiplus::Font segFont(L"Segoe UI Variable Text", 9.0f, Gdiplus::FontStyleBold);
+    Gdiplus::SolidBrush textWhite(colors::TextPrimary);
+    Gdiplus::SolidBrush textMuted(colors::TextSecondary);
+    Gdiplus::StringFormat sfCenter;
+    sfCenter.SetAlignment(Gdiplus::StringAlignmentCenter);
+    sfCenter.SetLineAlignment(Gdiplus::StringAlignmentCenter);
 
-    // Search Box
+    g.DrawString(L"Bookmarks", -1, &segFont, Gdiplus::RectF(14.0f, 98.0f, 76.0f, 26.0f), &sfCenter,
+                 (m_activeSidebarTab == SidebarTab::Bookmarks) ? &textWhite : &textMuted);
+    g.DrawString(L"Reading", -1, &segFont, Gdiplus::RectF(92.0f, 98.0f, 76.0f, 26.0f), &sfCenter,
+                 (m_activeSidebarTab == SidebarTab::ReadingList) ? &textWhite : &textMuted);
+    g.DrawString(L"History", -1, &segFont, Gdiplus::RectF(170.0f, 98.0f, 76.0f, 26.0f), &sfCenter,
+                 (m_activeSidebarTab == SidebarTab::History) ? &textWhite : &textMuted);
+
+    // Search Box (28px height, modern rounded)
     Gdiplus::SolidBrush searchBg(colors::AddressBg);
-    fillRoundedRect(g, searchBg, Gdiplus::RectF(12.0f, 132.0f, 236.0f, 26.0f), 6.0f);
-    Gdiplus::Font searchFont(L"Segoe UI Variable Text", 9.0f, Gdiplus::FontStyleRegular);
-    Gdiplus::SolidBrush phBrush(colors::TextMuted);
-    g.DrawString(L"Search", -1, &searchFont, Gdiplus::PointF(28.0f, 137.0f), &phBrush);
+    fillRoundedRect(g, searchBg, Gdiplus::RectF(12.0f, 134.0f, 236.0f, 28.0f), 7.0f);
 
-    // Sidebar items list
-    Gdiplus::Font itemFont(L"Segoe UI Variable Text", 9.5f, Gdiplus::FontStyleRegular);
-    Gdiplus::SolidBrush textPrim(colors::TextPrimary);
-    Gdiplus::SolidBrush textSub(colors::TextSecondary);
+    Gdiplus::Font searchFont(L"Segoe UI Variable Text", 9.5f, Gdiplus::FontStyleRegular);
+    Gdiplus::SolidBrush phBrush(colors::TextMuted);
+    Gdiplus::Pen glassPen(colors::TextMuted, 1.3f);
+    g.DrawEllipse(&glassPen, 22.0f, 142.0f, 7.0f, 7.0f);
+    g.DrawLine(&glassPen, 27.0f, 147.0f, 31.0f, 151.0f);
+
+    const wchar_t* searchPh = (m_activeSidebarTab == SidebarTab::Bookmarks) ? L"Search Bookmarks" :
+                              (m_activeSidebarTab == SidebarTab::ReadingList) ? L"Search Reading List" : L"Search History";
+    g.DrawString(searchPh, -1, &searchFont, Gdiplus::PointF(36.0f, 139.0f), &phBrush);
+
+    // Section Header Tag & Items List
+    Gdiplus::Font sectionHeaderFont(L"Segoe UI Variable Text", 8.5f, Gdiplus::FontStyleBold);
+    Gdiplus::SolidBrush headerTagBrush(Gdiplus::Color(255, 142, 142, 147));
+    Gdiplus::Font itemFont(L"Segoe UI Variable Text", 10.0f, Gdiplus::FontStyleRegular);
+    Gdiplus::Font itemBoldFont(L"Segoe UI Variable Text", 10.0f, Gdiplus::FontStyleBold);
+    Gdiplus::Font subFont(L"Segoe UI Variable Text", 8.5f, Gdiplus::FontStyleRegular);
 
     if (m_activeSidebarTab == SidebarTab::History) {
-        // "Clear History..." link
-        Gdiplus::Font clearFont(L"Segoe UI Variable Text", 9.0f, Gdiplus::FontStyleRegular);
-        Gdiplus::SolidBrush blueBrush(colors::AccentBlue);
-        g.DrawString(L"Clear History…", -1, &clearFont, Gdiplus::PointF(14.0f, 168.0f), &blueBrush);
+        g.DrawString(L"TODAY", -1, &sectionHeaderFont, Gdiplus::PointF(14.0f, 172.0f), &headerTagBrush);
 
-        int curY = 192;
+        Gdiplus::Font clearFont(L"Segoe UI Variable Text", 8.5f, Gdiplus::FontStyleRegular);
+        Gdiplus::SolidBrush blueBrush(colors::AccentBlue);
+        Gdiplus::StringFormat sfFar;
+        sfFar.SetAlignment(Gdiplus::StringAlignmentFar);
+        g.DrawString(L"Clear History\x2026", -1, &clearFont, Gdiplus::RectF(14.0f, 172.0f, 234.0f, 18.0f), &sfFar, &blueBrush);
+
+        int curY = 196;
         for (const auto& h : m_history) {
-            if (curY > height - 56) break;
-            g.DrawString(h.domain.c_str(), -1, &itemFont, Gdiplus::PointF(14.0f, (float)curY), &textPrim);
+            if (curY > height - 60) break;
+
+            Gdiplus::SolidBrush circleBg(Gdiplus::Color(255, 48, 48, 54));
+            fillRoundedRect(g, circleBg, Gdiplus::RectF(14.0f, (float)curY + 2.0f, 20.0f, 20.0f), 5.0f);
+
+            wchar_t lbuf[2] = { (wchar_t)::towupper(h.domain.empty() ? L'H' : h.domain[0]), 0 };
+            Gdiplus::Font lf(L"Segoe UI Variable Text", 8.5f, Gdiplus::FontStyleBold);
+            Gdiplus::StringFormat sfCenterBadge;
+            sfCenterBadge.SetAlignment(Gdiplus::StringAlignmentCenter);
+            sfCenterBadge.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+            g.DrawString(lbuf, -1, &lf, Gdiplus::RectF(14.0f, (float)curY + 2.0f, 20.0f, 20.0f), &sfCenterBadge, &textWhite);
+
+            g.DrawString(h.domain.c_str(), -1, &itemFont, Gdiplus::PointF(40.0f, (float)curY + 3.0f), &textWhite);
 
             wchar_t tbuf[32];
             swprintf(tbuf, 32, L"%d:%02d %ls", (h.time.wHour % 12 == 0 ? 12 : h.time.wHour % 12), h.time.wMinute, (h.time.wHour >= 12 ? L"PM" : L"AM"));
-            Gdiplus::StringFormat sfRight;
-            sfRight.SetAlignment(Gdiplus::StringAlignmentFar);
-            g.DrawString(tbuf, -1, &itemFont, Gdiplus::RectF(14.0f, (float)curY, 232.0f, 20.0f), &sfRight, &textSub);
+            g.DrawString(tbuf, -1, &subFont, Gdiplus::RectF(14.0f, (float)curY + 4.0f, 234.0f, 20.0f), &sfFar, &textMuted);
 
-            curY += 24;
+            curY += 30;
         }
     } else if (m_activeSidebarTab == SidebarTab::Bookmarks) {
-        int curY = 168;
+        g.DrawString(L"FAVORITES", -1, &sectionHeaderFont, Gdiplus::PointF(14.0f, 172.0f), &headerTagBrush);
+
+        int curY = 196;
         for (const auto& b : m_bookmarks) {
-            if (curY > height - 56) break;
+            if (curY > height - 60) break;
             Gdiplus::SolidBrush bBrush(Gdiplus::Color(255, GetRValue(b.color), GetGValue(b.color), GetBValue(b.color)));
-            fillRoundedRect(g, bBrush, Gdiplus::RectF(14.0f, (float)curY + 2.0f, 20.0f, 20.0f), 5.0f);
+            fillRoundedRect(g, bBrush, Gdiplus::RectF(14.0f, (float)curY + 2.0f, 22.0f, 22.0f), 6.0f);
 
             wchar_t lbuf[2] = { b.letter, 0 };
-            Gdiplus::Font lf(L"Segoe UI Variable Text", 8.5f, Gdiplus::FontStyleBold);
+            Gdiplus::Font lf(L"Segoe UI Variable Text", 9.0f, Gdiplus::FontStyleBold);
             Gdiplus::StringFormat sf;
             sf.SetAlignment(Gdiplus::StringAlignmentCenter);
             sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-            g.DrawString(lbuf, -1, &lf, Gdiplus::RectF(14.0f, (float)curY + 2.0f, 20.0f, 20.0f), &sf, &textPrim);
+            g.DrawString(lbuf, -1, &lf, Gdiplus::RectF(14.0f, (float)curY + 2.0f, 22.0f, 22.0f), &sf, &textWhite);
 
-            g.DrawString(b.title.c_str(), -1, &itemFont, Gdiplus::PointF(42.0f, (float)curY + 3.0f), &textPrim);
-            curY += 32;
+            g.DrawString(b.title.c_str(), -1, &itemFont, Gdiplus::PointF(44.0f, (float)curY + 4.0f), &textWhite);
+            curY += 34;
         }
     } else if (m_activeSidebarTab == SidebarTab::ReadingList) {
-        int curY = 168;
+        g.DrawString(L"UNREAD", -1, &sectionHeaderFont, Gdiplus::PointF(14.0f, 172.0f), &headerTagBrush);
+
+        int curY = 196;
         for (const auto& r : m_readingList) {
             if (curY > height - 70) break;
-            g.DrawString(r.title.c_str(), -1, &itemFont, Gdiplus::PointF(14.0f, (float)curY), &textPrim);
-            Gdiplus::Font exFont(L"Segoe UI Variable Text", 8.5f, Gdiplus::FontStyleRegular);
-            g.DrawString(r.excerpt.c_str(), -1, &exFont, Gdiplus::RectF(14.0f, (float)curY + 18.0f, 232.0f, 32.0f), nullptr, &textSub);
-            curY += 56;
+            g.DrawString(r.title.c_str(), -1, &itemBoldFont, Gdiplus::PointF(14.0f, (float)curY), &textWhite);
+            g.DrawString(r.excerpt.c_str(), -1, &subFont, Gdiplus::RectF(14.0f, (float)curY + 20.0f, 232.0f, 32.0f), nullptr, &textMuted);
+            curY += 58;
         }
     }
 
@@ -609,95 +675,157 @@ void Browser::paintSidebar(Gdiplus::Graphics& g, int height) {
         fillRoundedRect(g, hoverBrush, setBtnF, 6.0f);
     }
 
-    // Separator line above settings
     Gdiplus::Pen sepPen(colors::SidebarBorder, 1.0f);
     g.DrawLine(&sepPen, 12, (int)m_btnSettings.top - 6, 248, (int)m_btnSettings.top - 6);
 
     Gdiplus::Font gearFont(L"Segoe UI Symbol", 11.5f, Gdiplus::FontStyleRegular);
-    g.DrawString(L"\x2699", -1, &gearFont, Gdiplus::PointF(setBtnF.X + 8.0f, setBtnF.Y + 4.0f), &textPrim);
+    g.DrawString(L"\x2699", -1, &gearFont, Gdiplus::PointF(setBtnF.X + 8.0f, setBtnF.Y + 4.0f), &textWhite);
 
     Gdiplus::Font setLabelFont(L"Segoe UI Variable Text", 9.5f, Gdiplus::FontStyleRegular);
-    g.DrawString(L"Settings", -1, &setLabelFont, Gdiplus::PointF(setBtnF.X + 30.0f, setBtnF.Y + 6.0f), &textPrim);
+    g.DrawString(L"Settings", -1, &setLabelFont, Gdiplus::PointF(setBtnF.X + 30.0f, setBtnF.Y + 6.0f), &textWhite);
 
     Gdiplus::StringFormat sfFar;
     sfFar.SetAlignment(Gdiplus::StringAlignmentFar);
-    g.DrawString(L"\x203A", -1, &setLabelFont, Gdiplus::RectF(setBtnF.X, setBtnF.Y + 4.0f, setBtnF.Width - 8.0f, setBtnF.Height), &sfFar, &textSub);
+    g.DrawString(L"\x203A", -1, &setLabelFont, Gdiplus::RectF(setBtnF.X, setBtnF.Y + 4.0f, setBtnF.Width - 8.0f, setBtnF.Height), &sfFar, &textMuted);
 }
 
-void Browser::paintDownloadsPopover(Gdiplus::Graphics& g) {
-    Gdiplus::RectF popF(
-        (float)m_downloadsPopoverRect.left, (float)m_downloadsPopoverRect.top,
-        (float)(m_downloadsPopoverRect.right - m_downloadsPopoverRect.left),
-        (float)(m_downloadsPopoverRect.bottom - m_downloadsPopoverRect.top));
+void Browser::paintDownloadsPopup(HDC hdc) {
+    Gdiplus::Graphics g(hdc);
+    g.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
+    g.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
 
-    Gdiplus::SolidBrush popBg(colors::PopoverBg);
-    fillRoundedRect(g, popBg, popF, 12.0f);
+    // Popover rounded background
+    Gdiplus::SolidBrush bgBrush(colors::PopoverBg);
+    fillRoundedRect(g, bgBrush, Gdiplus::RectF(0.0f, 0.0f, 320.0f, 320.0f), 12.0f);
 
-    Gdiplus::Pen border(colors::PopoverBorder, 1.0f);
-    drawRoundedRect(g, border, popF, 12.0f);
+    Gdiplus::Pen borderPen(colors::PopoverBorder, 1.0f);
+    drawRoundedRect(g, borderPen, Gdiplus::RectF(0.0f, 0.0f, 319.0f, 319.0f), 12.0f);
 
-    // Popover Header
-    Gdiplus::Font headerFont(L"Segoe UI Variable Text", 10.5f, Gdiplus::FontStyleBold);
+    // Header
+    Gdiplus::Font headerFont(L"Segoe UI Variable Text", 11.0f, Gdiplus::FontStyleBold);
     Gdiplus::SolidBrush textPrim(colors::TextPrimary);
-    g.DrawString(L"Downloads", -1, &headerFont, Gdiplus::PointF(popF.X + 16.0f, popF.Y + 12.0f), &textPrim);
+    g.DrawString(L"Downloads", -1, &headerFont, Gdiplus::PointF(16.0f, 14.0f), &textPrim);
 
-    Gdiplus::Font clearFont(L"Segoe UI Variable Text", 9.0f, Gdiplus::FontStyleRegular);
+    Gdiplus::Font clearFont(L"Segoe UI Variable Text", 9.5f, Gdiplus::FontStyleRegular);
     Gdiplus::SolidBrush blueBrush(colors::AccentBlue);
-    g.DrawString(L"Clear", -1, &clearFont, Gdiplus::PointF(popF.X + popF.Width - 46.0f, popF.Y + 14.0f), &blueBrush);
+    g.DrawString(L"Clear", -1, &clearFont, Gdiplus::PointF(270.0f, 16.0f), &blueBrush);
 
     const auto& items = DownloadsManager::instance().items();
     if (items.empty()) {
-        Gdiplus::Font emptyFont(L"Segoe UI Variable Text", 9.5f, Gdiplus::FontStyleRegular);
+        Gdiplus::Font emptyFont(L"Segoe UI Variable Text", 10.0f, Gdiplus::FontStyleRegular);
         Gdiplus::SolidBrush muted(colors::TextSecondary);
         Gdiplus::StringFormat sf;
         sf.SetAlignment(Gdiplus::StringAlignmentCenter);
-        g.DrawString(L"No recent downloads", -1, &emptyFont, Gdiplus::RectF(popF.X, popF.Y + 100.0f, popF.Width, 30.0f), &sf, &muted);
+        g.DrawString(L"No recent downloads", -1, &emptyFont, Gdiplus::RectF(0.0f, 120.0f, 320.0f, 30.0f), &sf, &muted);
     } else {
-        int curY = (int)popF.Y + 44;
-        Gdiplus::Font nameFont(L"Segoe UI Variable Text", 9.5f, Gdiplus::FontStyleBold);
+        int curY = 48;
+        Gdiplus::Font nameFont(L"Segoe UI Variable Text", 10.0f, Gdiplus::FontStyleBold);
         Gdiplus::Font sizeFont(L"Segoe UI Variable Text", 8.5f, Gdiplus::FontStyleRegular);
         Gdiplus::SolidBrush subBrush(colors::TextSecondary);
 
         for (const auto& item : items) {
-            if (curY > popF.Y + popF.Height - 50) break;
+            if (curY > 240) break;
 
-            // Card
             Gdiplus::SolidBrush cardBg(Gdiplus::Color(255, 48, 48, 54));
-            fillRoundedRect(g, cardBg, Gdiplus::RectF(popF.X + 12.0f, (float)curY, popF.Width - 24.0f, 44.0f), 6.0f);
+            fillRoundedRect(g, cardBg, Gdiplus::RectF(12.0f, (float)curY, 296.0f, 46.0f), 7.0f);
 
-            // Document icon
             Gdiplus::Pen docPen(colors::TextSecondary, 1.4f);
-            g.DrawRectangle(&docPen, popF.X + 20.0f, (float)curY + 10.0f, 14.0f, 18.0f);
+            g.DrawRectangle(&docPen, 22.0f, (float)curY + 12.0f, 14.0f, 18.0f);
 
-            // Filename
-            g.DrawString(item.filename.c_str(), -1, &nameFont, Gdiplus::PointF(popF.X + 44.0f, (float)curY + 6.0f), &textPrim);
+            g.DrawString(item.filename.c_str(), -1, &nameFont, Gdiplus::PointF(46.0f, (float)curY + 8.0f), &textPrim);
 
-            // Status
             wchar_t sbuf[64];
             if (item.state == DownloadState::Completed) {
-                swprintf(sbuf, 64, L"Completed • %.1f MB", item.totalBytes / 1048576.0);
+                swprintf(sbuf, 64, L"Completed \x2022 %.1f MB", item.totalBytes / 1048576.0);
             } else {
-                swprintf(sbuf, 64, L"Downloading… %.1f MB", item.receivedBytes / 1048576.0);
+                swprintf(sbuf, 64, L"Downloading\x2026 %.1f MB", item.receivedBytes / 1048576.0);
             }
-            g.DrawString(sbuf, -1, &sizeFont, Gdiplus::PointF(popF.X + 44.0f, (float)curY + 24.0f), &subBrush);
+            g.DrawString(sbuf, -1, &sizeFont, Gdiplus::PointF(46.0f, (float)curY + 26.0f), &subBrush);
 
-            // Magnifier Icon (Reveal in Explorer)
-            g.DrawEllipse(&docPen, popF.X + popF.Width - 36.0f, (float)curY + 14.0f, 10.0f, 10.0f);
-            g.DrawLine(&docPen, popF.X + popF.Width - 29.0f, (float)curY + 21.0f, popF.X + popF.Width - 25.0f, (float)curY + 25.0f);
+            g.DrawEllipse(&docPen, 282.0f, (float)curY + 16.0f, 10.0f, 10.0f);
+            g.DrawLine(&docPen, 289.0f, (float)curY + 23.0f, 293.0f, (float)curY + 27.0f);
 
-            curY += 50;
+            curY += 52;
         }
     }
 
-    // Footer: Open Downloads Folder
+    // Footer
     Gdiplus::Pen divPen(colors::PopoverBorder, 1.0f);
-    g.DrawLine(&divPen, (int)popF.X, (int)popF.Y + (int)popF.Height - 38, (int)popF.X + (int)popF.Width, (int)popF.Y + (int)popF.Height - 38);
+    g.DrawLine(&divPen, 0, 282, 320, 282);
 
-    Gdiplus::Font footFont(L"Segoe UI Variable Text", 9.0f, Gdiplus::FontStyleRegular);
+    Gdiplus::Font footFont(L"Segoe UI Variable Text", 9.5f, Gdiplus::FontStyleRegular);
     Gdiplus::StringFormat footSf;
     footSf.SetAlignment(Gdiplus::StringAlignmentCenter);
     footSf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-    g.DrawString(L"Open Downloads Folder", -1, &footFont, Gdiplus::RectF(popF.X, popF.Y + popF.Height - 36.0f, popF.Width, 32.0f), &footSf, &blueBrush);
+    g.DrawString(L"Open Downloads Folder", -1, &footFont, Gdiplus::RectF(0.0f, 284.0f, 320.0f, 34.0f), &footSf, &blueBrush);
+}
+
+void Browser::onDownloadsPopupClick(POINT pt) {
+    if (pt.x >= 260 && pt.x <= 310 && pt.y >= 10 && pt.y <= 36) {
+        DownloadsManager::instance().clearCompleted();
+        if (m_hwndDownloadsPopup) InvalidateRect(m_hwndDownloadsPopup, nullptr, TRUE);
+        return;
+    }
+    if (pt.y >= 282) {
+        revealFileInExplorer(L"");
+        toggleDownloadsPopover();
+        return;
+    }
+    int curY = 48;
+    const auto& items = DownloadsManager::instance().items();
+    for (const auto& item : items) {
+        if (curY > 240) break;
+        RECT itemRect{ 12, curY, 308, curY + 46 };
+        if (PtInRect(&itemRect, pt)) {
+            revealFileInExplorer(item.destinationPath);
+            toggleDownloadsPopover();
+            return;
+        }
+        curY += 52;
+    }
+}
+
+LRESULT CALLBACK Browser::downloadsPopupProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    auto* self = (Browser*)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+    switch (msg) {
+    case WM_NCCREATE: {
+        auto* cs = reinterpret_cast<CREATESTRUCT*>(lParam);
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)cs->lpCreateParams);
+        return TRUE;
+    }
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        if (self) self->paintDownloadsPopup(hdc);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    case WM_LBUTTONDOWN: {
+        POINT pt{ (short)LOWORD(lParam), (short)HIWORD(lParam) };
+        if (self) self->onDownloadsPopupClick(pt);
+        return 0;
+    }
+    case WM_KILLFOCUS: {
+        if (self) {
+            self->m_downloadsPopoverOpen = false;
+            ShowWindow(hwnd, SW_HIDE);
+            InvalidateRect(self->m_hwnd, nullptr, FALSE);
+        }
+        return 0;
+    }
+    case WM_KEYDOWN: {
+        if (wParam == VK_ESCAPE) {
+            if (self) {
+                self->m_downloadsPopoverOpen = false;
+                ShowWindow(hwnd, SW_HIDE);
+                InvalidateRect(self->m_hwnd, nullptr, FALSE);
+            }
+            return 0;
+        }
+        break;
+    }
+    }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 void Browser::onMouseMove(POINT pt) {
@@ -706,9 +834,14 @@ void Browser::onMouseMove(POINT pt) {
     else if (PtInRect(&m_btnTrafficMin, pt)) m_hoverTraffic = 2;
     else if (PtInRect(&m_btnTrafficMax, pt)) m_hoverTraffic = 3;
 
+    m_hoverSidebar = PtInRect(&m_btnSidebarToggle, pt);
     m_hoverBack = PtInRect(&m_btnNavBack, pt);
     m_hoverForward = PtInRect(&m_btnNavForward, pt);
     m_hoverReload = PtInRect(&m_btnReload, pt);
+    m_hoverDownloads = PtInRect(&m_btnDownloads, pt);
+    m_hoverShare = PtInRect(&m_btnShare, pt);
+    m_hoverNewTab = PtInRect(&m_btnNewTabToolbar, pt);
+    m_hoverOverview = PtInRect(&m_btnOverview, pt);
     m_hoverSettings = (m_sidebarOpen && PtInRect(&m_btnSettings, pt));
 
     m_hoverTab = -1;
@@ -792,6 +925,14 @@ void Browser::onMouseDown(POINT pt) {
     // New Tab Toolbar (+)
     if (PtInRect(&m_btnNewTabToolbar, pt)) {
         createTab(L"chronos:start");
+        return;
+    }
+
+    // Tab Overview (Show All Tabs - 4th button)
+    if (PtInRect(&m_btnOverview, pt)) {
+        if (m_tabs.size() > 1) {
+            selectTab((m_activeTab + 1) % m_tabs.size());
+        }
         return;
     }
 
