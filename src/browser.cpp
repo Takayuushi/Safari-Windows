@@ -777,7 +777,7 @@ void Browser::onDownloadsPopupClick(POINT pt) {
         if (curY > 240) break;
         RECT itemRect{ 12, curY, 308, curY + 46 };
         if (PtInRect(&itemRect, pt)) {
-            revealFileInExplorer(item.destinationPath);
+            revealFileInExplorer(item.filePath);
             toggleDownloadsPopover();
             return;
         }
