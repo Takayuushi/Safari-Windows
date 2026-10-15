@@ -64,8 +64,9 @@ std::wstring normalizeInput(const std::wstring& input) {
     trimmed.erase(0, trimmed.find_first_not_of(L" \t\r\n"));
     trimmed.erase(trimmed.find_last_not_of(L" \t\r\n") + 1);
 
-    if (trimmed.empty()) return L"safari:start";
-    if (trimmed == L"safari:start" || trimmed == L"about:blank") return trimmed;
+    if (trimmed.empty()) return L"chronos:start";
+    if (trimmed == L"chronos:start" || trimmed == L"safari:start" || trimmed == L"about:blank") return L"chronos:start";
+    if (trimmed == L"chronos:settings" || trimmed == L"safari:settings" || trimmed == L"settings") return L"chronos:settings";
 
     if (trimmed.rfind(L"http://", 0) == 0 || trimmed.rfind(L"https://", 0) == 0) {
         return trimmed;
@@ -97,8 +98,11 @@ std::wstring normalizeInput(const std::wstring& input) {
 }
 
 std::wstring extractDomain(const std::wstring& url) {
-    if (url.empty() || url == L"safari:start" || url == L"about:blank") {
+    if (url.empty() || url == L"chronos:start" || url == L"safari:start" || url == L"about:blank") {
         return L"Start Page";
+    }
+    if (url == L"chronos:settings" || url == L"safari:settings") {
+        return L"Settings";
     }
 
     size_t start = 0;

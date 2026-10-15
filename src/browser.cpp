@@ -2,6 +2,7 @@
 #include "gfx.h"
 #include "util.h"
 #include "start_page.h"
+#include "settings_page.h"
 #include <gdiplus.h>
 #include <algorithm>
 #include <cstdio>
@@ -59,8 +60,8 @@ bool Browser::initialize(HWND hwnd) {
         DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Variable Text");
     SendMessageW(m_editAddress, WM_SETFONT, (WPARAM)hFont, TRUE);
 
-    // Initial Tab with Safari Start Page
-    createTab(L"safari:start");
+    // Initial Tab with Chronos Start Page
+    createTab(L"chronos:start");
     handleResize();
     return true;
 }
@@ -68,7 +69,13 @@ bool Browser::initialize(HWND hwnd) {
 void Browser::createTab(const std::wstring& url) {
     auto tab = Tab{};
     tab.url = url;
-    tab.title = (url == L"safari:start") ? L"Start Page" : L"Loading…";
+    if (url == L"chronos:settings" || url == L"safari:settings") {
+        tab.title = L"Settings";
+    } else if (url == L"chronos:start" || url == L"safari:start") {
+        tab.title = L"Start Page";
+    } else {
+        tab.title = L"Loading…";
+    }
     tab.webView = std::make_unique<WebView>();
 
     RECT webBounds{ 0, 86, 1200, 800 };
@@ -81,7 +88,7 @@ void Browser::createTab(const std::wstring& url) {
         if (newIndex < m_tabs.size()) {
             m_tabs[newIndex].title = newTitle.empty() ? extractDomain(m_tabs[newIndex].url) : newTitle;
             if (m_activeTab == newIndex) {
-                SetWindowTextW(m_hwnd, (m_tabs[newIndex].title + L" — Safari").c_str());
+                SetWindowTextW(m_hwnd, (m_tabs[newIndex].title + L" — Chronos").c_str());
             }
             InvalidateRect(m_hwnd, nullptr, FALSE);
         }
@@ -104,8 +111,15 @@ void Browser::createTab(const std::wstring& url) {
         }
     };
 
-    if (url == L"safari:start") {
-        viewPtr->loadHtml(getStartPageHtml(), "safari:start");
+    viewPtr->onDownloadStarted = [this]() {
+        m_downloadsPopoverOpen = true;
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+    };
+
+    if (url == L"chronos:start" || url == L"safari:start") {
+        viewPtr->loadHtml(getStartPageHtml(), "chronos:start");
+    } else if (url == L"chronos:settings" || url == L"safari:settings") {
+        viewPtr->loadHtml(getSettingsPageHtml(), "chronos:settings");
     } else {
         viewPtr->loadUrl(url);
     }
@@ -128,7 +142,7 @@ void Browser::selectTab(size_t index) {
         m_tabs[m_activeTab].webView->setFocus();
     }
 
-    SetWindowTextW(m_hwnd, (m_tabs[m_activeTab].title + L" — Safari").c_str());
+    SetWindowTextW(m_hwnd, (m_tabs[m_activeTab].title + L" — Chronos").c_str());
     handleResize();
     InvalidateRect(m_hwnd, nullptr, FALSE);
 }
@@ -157,9 +171,12 @@ void Browser::navigate(const std::wstring& input) {
     std::wstring target = normalizeInput(input);
     if (m_activeTab < m_tabs.size() && m_tabs[m_activeTab].webView) {
         m_tabs[m_activeTab].url = target;
-        if (target == L"safari:start") {
+        if (target == L"chronos:start" || target == L"safari:start") {
             m_tabs[m_activeTab].title = L"Start Page";
-            m_tabs[m_activeTab].webView->loadHtml(getStartPageHtml(), "safari:start");
+            m_tabs[m_activeTab].webView->loadHtml(getStartPageHtml(), "chronos:start");
+        } else if (target == L"chronos:settings" || target == L"safari:settings") {
+            m_tabs[m_activeTab].title = L"Settings";
+            m_tabs[m_activeTab].webView->loadHtml(getSettingsPageHtml(), "chronos:settings");
         } else {
             m_tabs[m_activeTab].webView->loadUrl(target);
         }
@@ -278,6 +295,7 @@ void Browser::updateLayout() {
         m_segHistoryRect   = RECT{ 172, 96, 248, 124 };
         m_sidebarSearchRect = RECT{ 12, 132, 248, 160 };
         m_btnClearHistoryRect = RECT{ 14, 166, 120, 186 };
+        m_btnSettings = RECT{ 12, height - 42, 248, height - 10 };
     }
 
     // Downloads Popover
@@ -542,7 +560,7 @@ void Browser::paintSidebar(Gdiplus::Graphics& g, int height) {
 
         int curY = 192;
         for (const auto& h : m_history) {
-            if (curY > height - 30) break;
+            if (curY > height - 56) break;
             g.DrawString(h.domain.c_str(), -1, &itemFont, Gdiplus::PointF(14.0f, (float)curY), &textPrim);
 
             wchar_t tbuf[32];
@@ -556,7 +574,7 @@ void Browser::paintSidebar(Gdiplus::Graphics& g, int height) {
     } else if (m_activeSidebarTab == SidebarTab::Bookmarks) {
         int curY = 168;
         for (const auto& b : m_bookmarks) {
-            if (curY > height - 36) break;
+            if (curY > height - 56) break;
             Gdiplus::SolidBrush bBrush(Gdiplus::Color(255, GetRValue(b.color), GetGValue(b.color), GetBValue(b.color)));
             fillRoundedRect(g, bBrush, Gdiplus::RectF(14.0f, (float)curY + 2.0f, 20.0f, 20.0f), 5.0f);
 
@@ -573,13 +591,37 @@ void Browser::paintSidebar(Gdiplus::Graphics& g, int height) {
     } else if (m_activeSidebarTab == SidebarTab::ReadingList) {
         int curY = 168;
         for (const auto& r : m_readingList) {
-            if (curY > height - 50) break;
+            if (curY > height - 70) break;
             g.DrawString(r.title.c_str(), -1, &itemFont, Gdiplus::PointF(14.0f, (float)curY), &textPrim);
             Gdiplus::Font exFont(L"Segoe UI Variable Text", 8.5f, Gdiplus::FontStyleRegular);
             g.DrawString(r.excerpt.c_str(), -1, &exFont, Gdiplus::RectF(14.0f, (float)curY + 18.0f, 232.0f, 32.0f), nullptr, &textSub);
             curY += 56;
         }
     }
+
+    // Settings Button at bottom of sidebar (Gear icon)
+    Gdiplus::RectF setBtnF((float)m_btnSettings.left, (float)m_btnSettings.top,
+                           (float)(m_btnSettings.right - m_btnSettings.left),
+                           (float)(m_btnSettings.bottom - m_btnSettings.top));
+
+    if (m_hoverSettings) {
+        Gdiplus::SolidBrush hoverBrush(Gdiplus::Color(255, 48, 48, 54));
+        fillRoundedRect(g, hoverBrush, setBtnF, 6.0f);
+    }
+
+    // Separator line above settings
+    Gdiplus::Pen sepPen(colors::SidebarBorder, 1.0f);
+    g.DrawLine(&sepPen, 12, (int)m_btnSettings.top - 6, 248, (int)m_btnSettings.top - 6);
+
+    Gdiplus::Font gearFont(L"Segoe UI Symbol", 11.5f, Gdiplus::FontStyleRegular);
+    g.DrawString(L"\x2699", -1, &gearFont, Gdiplus::PointF(setBtnF.X + 8.0f, setBtnF.Y + 4.0f), &textPrim);
+
+    Gdiplus::Font setLabelFont(L"Segoe UI Variable Text", 9.5f, Gdiplus::FontStyleRegular);
+    g.DrawString(L"Settings", -1, &setLabelFont, Gdiplus::PointF(setBtnF.X + 30.0f, setBtnF.Y + 6.0f), &textPrim);
+
+    Gdiplus::StringFormat sfFar;
+    sfFar.SetAlignment(Gdiplus::StringAlignmentFar);
+    g.DrawString(L"\x203A", -1, &setLabelFont, Gdiplus::RectF(setBtnF.X, setBtnF.Y + 4.0f, setBtnF.Width - 8.0f, setBtnF.Height), &sfFar, &textSub);
 }
 
 void Browser::paintDownloadsPopover(Gdiplus::Graphics& g) {
@@ -667,6 +709,7 @@ void Browser::onMouseMove(POINT pt) {
     m_hoverBack = PtInRect(&m_btnNavBack, pt);
     m_hoverForward = PtInRect(&m_btnNavForward, pt);
     m_hoverReload = PtInRect(&m_btnReload, pt);
+    m_hoverSettings = (m_sidebarOpen && PtInRect(&m_btnSettings, pt));
 
     m_hoverTab = -1;
     m_hoverTabClose = -1;
@@ -733,7 +776,7 @@ void Browser::onMouseDown(POINT pt) {
 
         SetWindowPos(m_editAddress, HWND_TOP, x, y, w, h, SWP_SHOWWINDOW);
         std::wstring curUrl = (m_activeTab < m_tabs.size()) ? m_tabs[m_activeTab].url : L"";
-        if (curUrl == L"safari:start") curUrl = L"";
+        if (curUrl == L"chronos:start" || curUrl == L"safari:start") curUrl = L"";
         SetWindowTextW(m_editAddress, curUrl.c_str());
         SetFocus(m_editAddress);
         SendMessageW(m_editAddress, EM_SETSEL, 0, -1);
@@ -748,7 +791,7 @@ void Browser::onMouseDown(POINT pt) {
 
     // New Tab Toolbar (+)
     if (PtInRect(&m_btnNewTabToolbar, pt)) {
-        createTab(L"safari:start");
+        createTab(L"chronos:start");
         return;
     }
 
@@ -766,12 +809,16 @@ void Browser::onMouseDown(POINT pt) {
 
     // New Tab in Bar (+)
     if (PtInRect(&m_btnNewTabInBar, pt)) {
-        createTab(L"safari:start");
+        createTab(L"chronos:start");
         return;
     }
 
-    // Sidebar Segments click
+    // Sidebar Segments click & Settings click
     if (m_sidebarOpen) {
+        if (PtInRect(&m_btnSettings, pt)) {
+            navigate(L"chronos:settings");
+            return;
+        }
         if (PtInRect(&m_segBookmarksRect, pt)) {
             m_activeSidebarTab = SidebarTab::Bookmarks;
             InvalidateRect(m_hwnd, nullptr, FALSE);
@@ -841,6 +888,7 @@ void Browser::onMouseLeave() {
     m_hoverBack = false;
     m_hoverForward = false;
     m_hoverReload = false;
+    m_hoverSettings = false;
     m_hoverTab = -1;
     m_hoverTabClose = -1;
     InvalidateRect(m_hwnd, nullptr, FALSE);
@@ -849,7 +897,7 @@ void Browser::onMouseLeave() {
 bool Browser::onKeyDown(WPARAM key) {
     if (GetKeyState(VK_CONTROL) & 0x8000) {
         if (key == 'T') {
-            createTab(L"safari:start");
+            createTab(L"chronos:start");
             return true;
         }
         if (key == 'W') {
@@ -868,6 +916,32 @@ bool Browser::onKeyDown(WPARAM key) {
             return true;
         }
     }
+    return false;
+}
+
+bool Browser::isHitInteractive(POINT pt) const {
+    if (PtInRect(&m_btnTrafficClose, pt)) return true;
+    if (PtInRect(&m_btnTrafficMin, pt)) return true;
+    if (PtInRect(&m_btnTrafficMax, pt)) return true;
+    if (PtInRect(&m_btnSidebarToggle, pt)) return true;
+    if (PtInRect(&m_btnNavBack, pt)) return true;
+    if (PtInRect(&m_btnNavForward, pt)) return true;
+    if (PtInRect(&m_addressBarRect, pt)) return true;
+    if (PtInRect(&m_btnReload, pt)) return true;
+    if (PtInRect(&m_btnDownloads, pt)) return true;
+    if (PtInRect(&m_btnShare, pt)) return true;
+    if (PtInRect(&m_btnNewTabToolbar, pt)) return true;
+    if (PtInRect(&m_btnOverview, pt)) return true;
+
+    // Tab bar area is interactive
+    if (pt.y >= 50 && pt.y < 86) return true;
+
+    // Downloads Popover
+    if (m_downloadsPopoverOpen && PtInRect(&m_downloadsPopoverRect, pt)) return true;
+
+    // Sidebar
+    if (m_sidebarOpen && PtInRect(&m_sidebarRect, pt)) return true;
+
     return false;
 }
 

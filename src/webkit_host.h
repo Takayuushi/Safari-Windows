@@ -44,7 +44,7 @@ public:
     void setFocus();
 
     void loadUrl(const std::wstring& url);
-    void loadHtml(const std::string& html, const std::string& baseUrl = "safari:start");
+    void loadHtml(const std::string& html, const std::string& baseUrl = "chronos:start");
 
     void goBack();
     void goForward();
@@ -64,6 +64,7 @@ public:
     std::function<void(double)> onProgressChanged;
     std::function<void(bool loading)> onLoadingChanged;
     std::function<void()> onNavStateChanged;
+    std::function<void()> onDownloadStarted;
 
 private:
     WKViewRef m_view = nullptr;
@@ -72,11 +73,14 @@ private:
     bool m_isLoading = false;
 
     void setupNavigationClient();
+    void setupPolicyClient();
 
     static void didStartProvisionalNavigation(WKPageRef page, WKNavigationRef navigation, WKTypeRef userData, const void* clientInfo);
     static void didCommitNavigation(WKPageRef page, WKNavigationRef navigation, WKTypeRef userData, const void* clientInfo);
     static void didFinishNavigation(WKPageRef page, WKNavigationRef navigation, WKTypeRef userData, const void* clientInfo);
     static void didFailNavigation(WKPageRef page, WKNavigationRef navigation, WKErrorRef error, WKTypeRef userData, const void* clientInfo);
+
+    static void decidePolicyForNavigationResponse(WKPageRef page, WKNavigationResponseRef navigationResponse, WKFramePolicyListenerRef listener, WKTypeRef userData, const void* clientInfo);
 };
 
 } // namespace safari

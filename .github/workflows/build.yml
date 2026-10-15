@@ -1,4 +1,4 @@
-name: Build Safari for Windows (WebKit)
+name: Build Chronos Compass for Windows (WebKit)
 
 on:
   push:
@@ -40,28 +40,28 @@ jobs:
       - name: Configure CMake
         shell: powershell
         run: |
-          cmake -S . -B build -A x64 "-DWEBKIT_SDK_DIR=$env:GITHUB_WORKSPACE\sdk" -DSAFARI_COPY_RUNTIME=OFF
+          cmake -S . -B build -A x64 "-DWEBKIT_SDK_DIR=$env:GITHUB_WORKSPACE\sdk" -DCHRONOS_COPY_RUNTIME=OFF
           if ($LASTEXITCODE -ne 0) { throw "CMake configure failed." }
 
-      - name: Build Safari Release
+      - name: Build Chronos Release
         shell: powershell
         run: |
           cmake --build build --config Release
           if ($LASTEXITCODE -ne 0) { throw "Build failed." }
 
-      - name: Package Safari with WebKit Runtime
+      - name: Package Chronos Compass with WebKit Runtime
         shell: powershell
         run: |
-          $dist = "dist\Safari"
+          $dist = "dist\Chronos Compass"
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
           Copy-Item -Path "sdk\runtime\*" -Destination $dist -Recurse -Force
-          Copy-Item -Path "build\Release\Safari.exe" -Destination $dist -Force
-          Compress-Archive -Path "$dist\*" -DestinationPath "Safari-Windows-x64.zip" -Force
-          Write-Host "Archive created: Safari-Windows-x64.zip"
+          Copy-Item -Path "build\Release\Chronos.exe" -Destination $dist -Force
+          Compress-Archive -Path "dist\Chronos Compass" -DestinationPath "Chronos-Compass-Windows-x64.zip" -Force
+          Write-Host "Archive created: Chronos-Compass-Windows-x64.zip"
 
-      - name: Upload Safari WebKit Artifact
+      - name: Upload Chronos Compass WebKit Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: safari-windows-x64
-          path: Safari-Windows-x64.zip
+          name: chronos-compass-windows-x64
+          path: Chronos-Compass-Windows-x64.zip
           retention-days: 90

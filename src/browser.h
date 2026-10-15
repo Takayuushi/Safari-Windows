@@ -19,8 +19,8 @@ enum class SidebarTab {
 
 struct Tab {
     std::unique_ptr<WebView> webView;
-    std::wstring title = L"Start Page";
-    std::wstring url = L"safari:start";
+    std::wstring title = L"Compass";
+    std::wstring url = L"chronos:start";
     bool isLoading = false;
 };
 
@@ -63,13 +63,14 @@ public:
     bool onKeyDown(WPARAM key);
 
     void navigate(const std::wstring& input);
-    void createTab(const std::wstring& url = L"safari:start");
+    void createTab(const std::wstring& url = L"chronos:start");
     void closeTab(size_t index);
     void selectTab(size_t index);
 
     void toggleSidebar();
     void toggleDownloadsPopover();
 
+    bool isHitInteractive(POINT pt) const;
     HWND window() const { return m_hwnd; }
 
 private:
@@ -119,6 +120,7 @@ private:
     RECT m_segHistoryRect{};
     RECT m_sidebarSearchRect{};
     RECT m_btnClearHistoryRect{};
+    RECT m_btnSettings{};
     std::vector<RECT> m_sidebarItemRects;
 
     RECT m_downloadsPopoverRect{};
@@ -130,6 +132,7 @@ private:
     // Hover states
     int m_hoverTraffic = 0; // 1=close, 2=min, 3=max
     bool m_hoverSidebar = false;
+    bool m_hoverSettings = false;
     bool m_hoverBack = false;
     bool m_hoverForward = false;
     bool m_hoverAddress = false;
