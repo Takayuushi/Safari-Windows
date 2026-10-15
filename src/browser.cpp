@@ -133,7 +133,7 @@ void Browser::createTab(const std::wstring& url) {
     viewPtr->onUrlChanged = [this, viewPtr](const std::wstring& newUrl) {
         int idx = findTabIndex(viewPtr);
         if (idx >= 0 && (size_t)idx < m_tabs.size()) {
-            if (m_tabs[idx].url == newUrl && !newUrl.contains(L"?")) {
+            if (m_tabs[idx].url == newUrl && newUrl.find(L'?') == std::wstring::npos) {
                 return;
             }
             if (newUrl.starts_with(L"chronos:") || newUrl.starts_with(L"safari:")) {
