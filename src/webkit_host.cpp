@@ -50,13 +50,14 @@ static void configurePreferences(WKPreferencesRef prefs) {
     WKPreferencesSetMediaCapabilitiesEnabled(prefs, true);
     WKPreferencesSetAllowMediaContentTypesRequiringHardwareSupportAsFallback(prefs, true);
 
-    // Media Source Extensions (MSE) & Video Playback configuration for YouTube / HTML5 streaming
-    WKPreferencesSetMediaSourceEnabled(prefs, true);
+    // Media & video playback permissions for YouTube / HTML5 streaming
     WKPreferencesSetMediaPlaybackAllowsInline(prefs, true);
     WKPreferencesSetInlineMediaPlaybackRequiresPlaysInlineAttribute(prefs, false);
     WKPreferencesSetMediaPlaybackRequiresUserGesture(prefs, false);
     WKPreferencesSetVideoPlaybackRequiresUserGesture(prefs, false);
     WKPreferencesSetAudioPlaybackRequiresUserGesture(prefs, false);
+    WKPreferencesSetMainContentUserGestureOverrideEnabled(prefs, true);
+    WKPreferencesSetMediaUserGestureInheritsFromDocument(prefs, true);
     WKPreferencesSetAllowsPictureInPictureMediaPlayback(prefs, true);
     WKPreferencesSetMediaPreloadingEnabled(prefs, true);
     WKPreferencesSetInvisibleMediaAutoplayPermitted(prefs, true);
@@ -259,6 +260,20 @@ bool WebView::create(HWND parent, const RECT& bounds) {
         }
       }
 
+      document.addEventListener('click', function(e) {
+        var t = e.target;
+        if (t && (t.closest('#movie_player') || t.closest('.ytp-large-play-button') || t.closest('.ytp-cued-thumbnail-overlay') || t.closest('.html5-video-player'))) {
+          var mp = document.getElementById('movie_player');
+          if (mp && typeof mp.playVideo === 'function') {
+            try { mp.playVideo(); } catch(err) {}
+          }
+          var v = document.querySelector('#movie_player video, video.html5-main-video');
+          if (v && v.paused) {
+            try { v.play(); } catch(err) {}
+          }
+        }
+      }, true);
+
       setInterval(autoSkipAds, 350);
       window.addEventListener('DOMContentLoaded', cleanLegacy);
       window.addEventListener('yt-navigate-finish', cleanLegacy);
@@ -282,6 +297,10 @@ bool WebView::create(HWND parent, const RECT& bounds) {
 
     if (!m_view) return false;
 
+    // Notify WebKit that the view is hosted in an active native window so WebCore initializes media data loading
+    WKViewSetIsInWindow(m_view, true);
+    WKViewWindowAncestryDidChange(m_view);
+
     m_page = WKViewGetPage(m_view);
 
     // Modern Windows Desktop User-Agent with Safari/WebKit signature
@@ -301,6 +320,7 @@ void WebView::destroy() {
     if (m_view) {
         HWND w = WKViewGetWindow(m_view);
         if (w) ShowWindow(w, SW_HIDE);
+        WKViewSetIsInWindow(m_view, false);
         // Do not call WKRelease(m_view) on shutdown to prevent WebKit worker thread crash
         m_view = nullptr;
         m_page = nullptr;
@@ -319,10 +339,19 @@ void WebView::setBounds(const RECT& bounds) {
             bounds.right - bounds.left, bounds.bottom - bounds.top,
             SWP_NOACTIVATE | SWP_SHOWWINDOW);
         RedrawWindow(w, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+        if (m_view) {
+            WKViewWindowAncestryDidChange(m_view);
+        }
     }
 }
 
 void WebView::setVisible(bool visible) {
+    if (m_view) {
+        WKViewSetIsInWindow(m_view, visible);
+        if (visible) {
+            WKViewWindowAncestryDidChange(m_view);
+        }
+    }
     HWND w = window();
     if (w) {
         if (visible) {
@@ -341,6 +370,9 @@ void WebView::setFocus() {
     HWND w = window();
     if (w) {
         SetFocus(w);
+        if (m_view) {
+            WKViewWindowAncestryDidChange(m_view);
+        }
     }
 }
 
