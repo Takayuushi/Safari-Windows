@@ -1,6 +1,7 @@
 #pragma once
 
 #include <windows.h>
+#include <unknwn.h>
 #include <gdiplus.h>
 #include <string>
 

@@ -1,4 +1,5 @@
 #include "util.h"
+#include <unknwn.h>
 #include <gdiplus.h>
 #include <shlobj.h>
 #include <algorithm>
