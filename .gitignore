@@ -3,5 +3,7 @@ src-tauri/target/
 dist-package/
 Safari-Windows-x64.zip
 __pycache__/
+bin/
+obj/
 *.log
 .DS_Store
