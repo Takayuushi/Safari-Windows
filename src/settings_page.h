@@ -14,6 +14,22 @@ struct BrowserSettings {
     std::wstring homepage = L"chronos:start";
     double pageZoom = 1.0;
     bool devToolsEnabled = true;
+
+    // Windows / Offline AutoFill Profile
+    bool autoFillContacts = true;
+    std::wstring contactName = L"";
+    std::wstring contactEmail = L"";
+    std::wstring contactPhone = L"";
+    std::wstring contactAddress = L"";
+
+    // Passwords & Windows Vault
+    bool autoFillPasswords = true;
+
+    // Secure DNS / Privacy Relay (Cross-platform online equivalent to iCloud Private Relay)
+    std::wstring privacyDns = L"Cloudflare 1.1.1.1 (Privacy Relay)";
+
+    // Smart Search Suggestions
+    bool searchSuggestions = true;
 };
 
 inline std::string getSettingsPageHtml(const BrowserSettings& s = BrowserSettings{}) {
@@ -305,10 +321,38 @@ inline std::string getSettingsPageHtml(const BrowserSettings& s = BrowserSetting
     <div class="group">
       <div class="row">
         <div class="label-group">
-          <div class="label">Using info from my contacts</div>
-          <div class="desc">Auto-fill name, address, email, and phone numbers in web forms</div>
+          <div class="label">AutoFill Contact Profile</div>
+          <div class="desc">Auto-fill name, address, email, and phone numbers in web forms from your Windows profile</div>
         </div>
-        <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+        <label class="switch"><input type="checkbox" )HTML" + (s.autoFillContacts ? std::string("checked") : "") + R"HTML( onchange="saveSetting('autoFillContacts', this.checked ? 'true' : 'false')"><span class="slider"></span></label>
+      </div>
+      <div class="row">
+        <div class="label-group">
+          <div class="label">Full Name</div>
+          <div class="desc">Your legal or display name for web forms</div>
+        </div>
+        <input type="text" id="contactName" value=")HTML" + toUtf8(s.contactName) + R"HTML(" placeholder="e.g. Alex Mercer" style="width:240px" onchange="saveSetting('contactName', this.value)">
+      </div>
+      <div class="row">
+        <div class="label-group">
+          <div class="label">Email Address</div>
+          <div class="desc">Default email used when registering or checking out</div>
+        </div>
+        <input type="text" id="contactEmail" value=")HTML" + toUtf8(s.contactEmail) + R"HTML(" placeholder="e.g. alex@example.com" style="width:240px" onchange="saveSetting('contactEmail', this.value)">
+      </div>
+      <div class="row">
+        <div class="label-group">
+          <div class="label">Phone Number</div>
+          <div class="desc">Phone number for two-factor recovery and delivery forms</div>
+        </div>
+        <input type="text" id="contactPhone" value=")HTML" + toUtf8(s.contactPhone) + R"HTML(" placeholder="e.g. +1 555-0199" style="width:240px" onchange="saveSetting('contactPhone', this.value)">
+      </div>
+      <div class="row">
+        <div class="label-group">
+          <div class="label">Street Address &amp; City</div>
+          <div class="desc">Saved address for automated checkout and shipping forms</div>
+        </div>
+        <input type="text" id="contactAddress" value=")HTML" + toUtf8(s.contactAddress) + R"HTML(" placeholder="e.g. 742 Evergreen Terrace" style="width:240px" onchange="saveSetting('contactAddress', this.value)">
       </div>
       <div class="row">
         <div class="label-group">
@@ -341,21 +385,21 @@ inline std::string getSettingsPageHtml(const BrowserSettings& s = BrowserSetting
       <div class="row">
         <div class="label-group">
           <div class="label">AutoFill Passwords and Passkeys</div>
-          <div class="desc">Allow filling stored credentials automatically with Windows Hello</div>
+          <div class="desc">Allow filling stored credentials automatically with Windows Hello &amp; DPAPI</div>
         </div>
-        <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+        <label class="switch"><input type="checkbox" )HTML" + (s.autoFillPasswords ? std::string("checked") : "") + R"HTML( onchange="saveSetting('autoFillPasswords', this.checked ? 'true' : 'false')"><span class="slider"></span></label>
       </div>
       <div class="row">
         <div class="label-group">
-          <div class="label">Detect Compromised Passwords</div>
-          <div class="desc">Alert when stored credentials appear in known public data leaks</div>
+          <div class="label">Windows Credential Manager (Vault)</div>
+          <div class="desc">Inspect, edit, and back up hardware-encrypted passwords and web credentials</div>
         </div>
-        <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+        <button class="btn-action" onclick="location.href='chronos:open_credential_manager'">Open Windows Vault</button>
       </div>
       <div class="row">
         <div class="label-group">
-          <div class="label">Vault Encryption</div>
-          <div class="desc">Hardware-backed cryptographic protection</div>
+          <div class="label">Vault Encryption Architecture</div>
+          <div class="desc">Hardware-backed cryptographic protection using Windows DPAPI</div>
         </div>
         <span class="badge">Windows DPAPI &bull; AES-256</span>
       </div>
@@ -388,10 +432,10 @@ inline std::string getSettingsPageHtml(const BrowserSettings& s = BrowserSetting
       </div>
       <div class="row">
         <div class="label-group">
-          <div class="label">Include Safari Suggestions</div>
-          <div class="desc">Show news, Wikipedia summaries, and weather directly in dropdown</div>
+          <div class="label">Smart Search Suggestions</div>
+          <div class="desc">Show news and summaries from Wikipedia OpenSearch and DuckDuckGo</div>
         </div>
-        <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+        <label class="switch"><input type="checkbox" )HTML" + (s.searchSuggestions ? std::string("checked") : "") + R"HTML( onchange="saveSetting('searchSuggestions', this.checked ? 'true' : 'false')"><span class="slider"></span></label>
       </div>
       <div class="row">
         <div class="label-group">
@@ -458,13 +502,15 @@ inline std::string getSettingsPageHtml(const BrowserSettings& s = BrowserSetting
       </div>
       <div class="row">
         <div class="label-group">
-          <div class="label">Hide IP address from known trackers</div>
-          <div class="desc">Protect your geographic location via iCloud Private Relay</div>
+          <div class="label">Encrypted DNS Privacy Relay (DoH)</div>
+          <div class="desc">Conceal IP queries and prevent ISP tracking using encrypted DNS-over-HTTPS</div>
         </div>
-        <div style="display:flex;align-items:center;gap:10px">
-          <span class="badge" style="background:rgba(255,255,255,0.08);color:#8e8e93;font-size:11px">Apple Ecosystem</span>
-          <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
-        </div>
+        <select onchange="saveSetting('privacyDns', this.value)">
+          <option )HTML" + (s.privacyDns.find(L"Cloudflare") != std::wstring::npos ? std::string("selected") : "") + R"HTML(>Cloudflare 1.1.1.1 (Privacy Relay)</option>
+          <option )HTML" + (s.privacyDns.find(L"Quad9") != std::wstring::npos ? std::string("selected") : "") + R"HTML(>Quad9 (Malware &amp; Tracker Blocking)</option>
+          <option )HTML" + (s.privacyDns.find(L"Google") != std::wstring::npos ? std::string("selected") : "") + R"HTML(>Google Public DNS</option>
+          <option )HTML" + (s.privacyDns.find(L"System") != std::wstring::npos ? std::string("selected") : "") + R"HTML(>System Default DNS</option>
+        </select>
       </div>
       <div class="row">
         <div class="label-group">

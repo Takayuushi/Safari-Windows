@@ -83,7 +83,7 @@ bool Browser::initialize(HWND hwnd) {
         pc.lpszClassName,
         L"",
         WS_POPUP | WS_CLIPSIBLINGS,
-        0, 0, 320, 320,
+        0, 0, 384, 340,
         m_hwnd, nullptr, GetModuleHandle(nullptr), this);
 
     // Create Address Bar Edit Control (hidden initially, shown on click)
@@ -385,10 +385,30 @@ void Browser::handleInternalUrl(size_t tabIdx, const std::wstring& target) {
             }
         } else if (key == L"devTools") {
             m_settings.devToolsEnabled = (val == L"true");
+        } else if (key == L"autoFillContacts") {
+            m_settings.autoFillContacts = (val == L"true");
+        } else if (key == L"contactName") {
+            m_settings.contactName = val;
+        } else if (key == L"contactEmail") {
+            m_settings.contactEmail = val;
+        } else if (key == L"contactPhone") {
+            m_settings.contactPhone = val;
+        } else if (key == L"contactAddress") {
+            m_settings.contactAddress = val;
+        } else if (key == L"autoFillPasswords") {
+            m_settings.autoFillPasswords = (val == L"true");
+        } else if (key == L"privacyDns") {
+            m_settings.privacyDns = val;
+        } else if (key == L"searchSuggestions") {
+            m_settings.searchSuggestions = (val == L"true");
         }
 
         std::string baseUrl = "chronos:settings" + toUtf8(hashPart);
         m_tabs[tabIdx].webView->loadHtml(getSettingsPageHtml(m_settings), baseUrl);
+        return;
+    }
+    if (target == L"chronos:open_credential_manager" || target == L"safari:open_credential_manager") {
+        ShellExecuteW(nullptr, L"open", L"control.exe", L"/name Microsoft.CredentialManager", nullptr, SW_SHOWNORMAL);
         return;
     }
     if (target == L"chronos:open_downloads_folder" || target == L"safari:open_downloads_folder") {
@@ -464,11 +484,12 @@ void Browser::toggleDownloadsPopover() {
     if (m_hwndDownloadsPopup) {
         if (m_downloadsPopoverOpen) {
             int itemCount = (int)DownloadsManager::instance().items().size();
-            int popHeight = (itemCount == 0) ? 120 : std::clamp(48 + itemCount * 52 + 38, 138, 300);
+            int popHeight = (itemCount == 0) ? 120 : std::clamp(52 + itemCount * 54 + 38, 144, 340);
+            int popWidth = 384;
 
-            POINT pt{ m_btnDownloads.left - 240, 50 };
+            POINT pt{ m_btnDownloads.left - (popWidth - 48), 50 };
             ClientToScreen(m_hwnd, &pt);
-            SetWindowPos(m_hwndDownloadsPopup, HWND_TOPMOST, pt.x, pt.y, 320, popHeight, SWP_SHOWWINDOW);
+            SetWindowPos(m_hwndDownloadsPopup, HWND_TOPMOST, pt.x, pt.y, popWidth, popHeight, SWP_SHOWWINDOW);
             SetFocus(m_hwndDownloadsPopup);
             InvalidateRect(m_hwndDownloadsPopup, nullptr, TRUE);
         } else {
@@ -1057,37 +1078,49 @@ void Browser::paintDownloadsPopup(HDC hdc) {
     drawRoundedRect(g, borderPen, Gdiplus::RectF(0.0f, 0.0f, (float)popWidth - 1.0f, (float)popHeight - 1.0f), 12.0f);
 
     // Header
-    Gdiplus::Font headerFont(L"Segoe UI Variable Text", 11.0f, Gdiplus::FontStyleBold);
+    Gdiplus::Font headerFont(L"Segoe UI Variable Text", 10.5f, Gdiplus::FontStyleBold);
     Gdiplus::SolidBrush textPrim(colors::TextPrimary);
-    g.DrawString(L"Downloads", -1, &headerFont, Gdiplus::PointF(16.0f, 14.0f), &textPrim);
+    g.DrawString(L"Downloads", -1, &headerFont, Gdiplus::PointF(16.0f, 13.0f), &textPrim);
 
-    Gdiplus::Font clearFont(L"Segoe UI Variable Text", 9.5f, Gdiplus::FontStyleRegular);
+    Gdiplus::Font clearFont(L"Segoe UI Variable Text", 8.5f, Gdiplus::FontStyleRegular);
     Gdiplus::SolidBrush blueBrush(colors::AccentBlue);
-    g.DrawString(L"Clear", -1, &clearFont, Gdiplus::PointF((float)popWidth - 50.0f, 16.0f), &blueBrush);
+    g.DrawString(L"Clear", -1, &clearFont, Gdiplus::PointF((float)popWidth - 48.0f, 15.0f), &blueBrush);
 
     const auto& items = DownloadsManager::instance().items();
     if (items.empty()) {
-        Gdiplus::Font emptyFont(L"Segoe UI Variable Text", 10.0f, Gdiplus::FontStyleRegular);
+        Gdiplus::Font emptyFont(L"Segoe UI Variable Text", 9.0f, Gdiplus::FontStyleRegular);
         Gdiplus::SolidBrush muted(colors::TextSecondary);
         Gdiplus::StringFormat sf;
         sf.SetAlignment(Gdiplus::StringAlignmentCenter);
-        g.DrawString(L"No recent downloads", -1, &emptyFont, Gdiplus::RectF(0.0f, 50.0f, (float)popWidth, 30.0f), &sf, &muted);
+        g.DrawString(L"No recent downloads", -1, &emptyFont, Gdiplus::RectF(0.0f, 48.0f, (float)popWidth, 30.0f), &sf, &muted);
     } else {
-        int curY = 48;
-        Gdiplus::Font nameFont(L"Segoe UI Variable Text", 10.0f, Gdiplus::FontStyleBold);
-        Gdiplus::Font sizeFont(L"Segoe UI Variable Text", 8.5f, Gdiplus::FontStyleRegular);
+        int curY = 44;
+        Gdiplus::Font nameFont(L"Segoe UI Variable Text", 8.5f, Gdiplus::FontStyleBold);
+        Gdiplus::Font sizeFont(L"Segoe UI Variable Text", 7.5f, Gdiplus::FontStyleRegular);
         Gdiplus::SolidBrush subBrush(colors::TextSecondary);
 
+        Gdiplus::StringFormat sfEllipsis;
+        sfEllipsis.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
+        sfEllipsis.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+
         for (const auto& item : items) {
-            if (curY > popHeight - 50) break;
+            if (curY > popHeight - 48) break;
 
-            Gdiplus::SolidBrush cardBg(Gdiplus::Color(255, 48, 48, 54));
-            fillRoundedRect(g, cardBg, Gdiplus::RectF(12.0f, (float)curY, (float)popWidth - 24.0f, 46.0f), 7.0f);
+            Gdiplus::SolidBrush cardBg(Gdiplus::Color(255, 44, 44, 50));
+            fillRoundedRect(g, cardBg, Gdiplus::RectF(12.0f, (float)curY, (float)popWidth - 24.0f, 44.0f), 8.0f);
 
-            Gdiplus::Pen docPen(colors::TextSecondary, 1.4f);
-            g.DrawRectangle(&docPen, 22.0f, (float)curY + 12.0f, 14.0f, 18.0f);
+            // Apple Document Icon
+            Gdiplus::SolidBrush docBg(Gdiplus::Color(255, 58, 58, 66));
+            fillRoundedRect(g, docBg, Gdiplus::RectF(18.0f, (float)curY + 9.0f, 18.0f, 24.0f), 3.0f);
+            Gdiplus::Pen docPen(Gdiplus::Color(255, 110, 110, 120), 1.0f);
+            drawRoundedRect(g, docPen, Gdiplus::RectF(18.0f, (float)curY + 9.0f, 18.0f, 24.0f), 3.0f);
+            Gdiplus::Pen linePen(Gdiplus::Color(255, 150, 150, 160), 1.0f);
+            g.DrawLine(&linePen, 22.0f, (float)curY + 16.0f, 30.0f, (float)curY + 16.0f);
+            g.DrawLine(&linePen, 22.0f, (float)curY + 21.0f, 28.0f, (float)curY + 21.0f);
 
-            g.DrawString(item.filename.c_str(), -1, &nameFont, Gdiplus::PointF(46.0f, (float)curY + 8.0f), &textPrim);
+            // Item filename: width constrained so it never wraps or overflows
+            float textW = (float)popWidth - 86.0f;
+            g.DrawString(item.filename.c_str(), -1, &nameFont, Gdiplus::RectF(44.0f, (float)curY + 7.0f, textW, 15.0f), &sfEllipsis, &textPrim);
 
             wchar_t sbuf[64];
             if (item.state == DownloadState::Completed) {
@@ -1106,40 +1139,51 @@ void Browser::paintDownloadsPopup(HDC hdc) {
             } else {
                 swprintf(sbuf, 64, L"Failed");
             }
-            g.DrawString(sbuf, -1, &sizeFont, Gdiplus::PointF(46.0f, (float)curY + 24.0f), &subBrush);
+            g.DrawString(sbuf, -1, &sizeFont, Gdiplus::RectF(44.0f, (float)curY + 22.0f, textW, 13.0f), &sfEllipsis, &subBrush);
 
             // Mini progress bar for in-progress or paused downloads
             if (item.state == DownloadState::InProgress || item.state == DownloadState::Paused) {
-                float barW = (float)popWidth - 110.0f;
+                float barW = textW;
                 float pct = 0.0f;
                 if (item.totalBytes > 0) {
                     pct = (float)((double)item.receivedBytes / (double)item.totalBytes);
                     if (pct > 1.0f) pct = 1.0f;
                 }
                 Gdiplus::SolidBrush barBg(Gdiplus::Color(255, 60, 60, 66));
-                fillRoundedRect(g, barBg, Gdiplus::RectF(46.0f, (float)curY + 38.0f, barW, 3.0f), 1.5f);
+                fillRoundedRect(g, barBg, Gdiplus::RectF(44.0f, (float)curY + 36.0f, barW, 2.5f), 1.0f);
                 if (pct > 0.0f) {
                     Gdiplus::SolidBrush barFill(item.state == DownloadState::Paused ? Gdiplus::Color(255, 255, 159, 10) : colors::AccentBlue);
-                    fillRoundedRect(g, barFill, Gdiplus::RectF(46.0f, (float)curY + 38.0f, barW * pct, 3.0f), 1.5f);
+                    fillRoundedRect(g, barFill, Gdiplus::RectF(44.0f, (float)curY + 36.0f, barW * pct, 2.5f), 1.0f);
                 }
             }
 
-            g.DrawEllipse(&docPen, (float)popWidth - 38.0f, (float)curY + 16.0f, 10.0f, 10.0f);
-            g.DrawLine(&docPen, (float)popWidth - 31.0f, (float)curY + 23.0f, (float)popWidth - 27.0f, (float)curY + 27.0f);
+            // Action button on right
+            if (item.state == DownloadState::InProgress) {
+                // Cancel button 'x'
+                Gdiplus::Pen cancelPen(Gdiplus::Color(255, 160, 160, 170), 1.2f);
+                g.DrawEllipse(&cancelPen, (float)popWidth - 34.0f, (float)curY + 14.0f, 15.0f, 15.0f);
+                g.DrawLine(&cancelPen, (float)popWidth - 30.0f, (float)curY + 18.0f, (float)popWidth - 23.0f, (float)curY + 25.0f);
+                g.DrawLine(&cancelPen, (float)popWidth - 23.0f, (float)curY + 18.0f, (float)popWidth - 30.0f, (float)curY + 25.0f);
+            } else {
+                // Safari Magnifying glass (reveal in Explorer)
+                Gdiplus::Pen magPen(Gdiplus::Color(255, 160, 160, 170), 1.3f);
+                g.DrawEllipse(&magPen, (float)popWidth - 33.0f, (float)curY + 14.0f, 9.0f, 9.0f);
+                g.DrawLine(&magPen, (float)popWidth - 26.5f, (float)curY + 20.5f, (float)popWidth - 22.0f, (float)curY + 25.0f);
+            }
 
-            curY += 52;
+            curY += 49;
         }
     }
 
     // Footer: Show All
     Gdiplus::Pen divPen(colors::PopoverBorder, 1.0f);
-    g.DrawLine(&divPen, 0, popHeight - 38, popWidth, popHeight - 38);
+    g.DrawLine(&divPen, 0, popHeight - 34, popWidth, popHeight - 34);
 
-    Gdiplus::Font footFont(L"Segoe UI Variable Text", 9.5f, Gdiplus::FontStyleRegular);
+    Gdiplus::Font footFont(L"Segoe UI Variable Text", 8.5f, Gdiplus::FontStyleRegular);
     Gdiplus::StringFormat footSf;
     footSf.SetAlignment(Gdiplus::StringAlignmentCenter);
     footSf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-    g.DrawString(L"Show All \x203A", -1, &footFont, Gdiplus::RectF(0.0f, (float)popHeight - 36.0f, (float)popWidth, 32.0f), &footSf, &blueBrush);
+    g.DrawString(L"Show All \x203A", -1, &footFont, Gdiplus::RectF(0.0f, (float)popHeight - 34.0f, (float)popWidth, 30.0f), &footSf, &blueBrush);
 
     BitBlt(hdc, 0, 0, popWidth, popHeight, memDC, 0, 0, SRCCOPY);
     SelectObject(memDC, oldBmp);
@@ -1150,9 +1194,11 @@ void Browser::paintDownloadsPopup(HDC hdc) {
 void Browser::onDownloadsPopupClick(POINT pt) {
     RECT client{};
     GetClientRect(m_hwndDownloadsPopup, &client);
+    int popWidth = client.right - client.left;
     int popHeight = client.bottom - client.top;
 
-    if (pt.x >= 260 && pt.x <= 310 && pt.y >= 10 && pt.y <= 36) {
+    // Clear button
+    if (pt.x >= popWidth - 60 && pt.x <= popWidth - 10 && pt.y >= 8 && pt.y <= 36) {
         DownloadsManager::instance().clearCompleted();
         if (DownloadsManager::instance().items().empty()) {
             m_downloadsPopoverOpen = false;
@@ -1165,22 +1211,30 @@ void Browser::onDownloadsPopupClick(POINT pt) {
         return;
     }
     // "Show All" footer
-    if (pt.y >= popHeight - 38) {
+    if (pt.y >= popHeight - 34) {
         toggleDownloadsPopover();
         createTab(L"chronos:downloads");
         return;
     }
-    int curY = 48;
+    int curY = 44;
     const auto& items = DownloadsManager::instance().items();
     for (const auto& item : items) {
-        if (curY > popHeight - 50) break;
-        RECT itemRect{ 12, curY, 308, curY + 46 };
+        if (curY > popHeight - 48) break;
+        RECT itemRect{ 12, curY, popWidth - 12, curY + 44 };
         if (PtInRect(&itemRect, pt)) {
+            // Right-side action button click
+            if (pt.x >= popWidth - 44) {
+                if (item.state == DownloadState::InProgress) {
+                    DownloadsManager::instance().cancelDownload(item.id);
+                    InvalidateRect(m_hwndDownloadsPopup, nullptr, FALSE);
+                    return;
+                }
+            }
             revealFileInExplorer(item.filePath);
             toggleDownloadsPopover();
             return;
         }
-        curY += 52;
+        curY += 49;
     }
 }
 

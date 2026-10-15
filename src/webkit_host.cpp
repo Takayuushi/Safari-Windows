@@ -192,13 +192,14 @@ bool WebView::create(HWND parent, const RECT& bounds) {
     // YouTube Watch Player Integration
     if (window.location && window.location.hostname && window.location.hostname.indexOf('youtube.com') !== -1) {
       var activeConnectedVid = null;
-      var isConnecting = false;
 
       function checkWatchPage() {
         var isWatch = window.location.pathname === '/watch';
         if (!isWatch) {
-          var oldP = document.getElementById('chronos-native-video');
+          var oldP = document.getElementById('chronos-yt-embed');
           if (oldP) oldP.remove();
+          var oldNative = document.getElementById('chronos-native-video');
+          if (oldNative) oldNative.remove();
           var mp = document.getElementById('movie_player');
           if (mp) mp.style.display = '';
           activeConnectedVid = null;
@@ -208,7 +209,10 @@ bool WebView::create(HWND parent, const RECT& bounds) {
         var match = window.location.search.match(/[?&]v=([^&]+)/);
         if (!match) return;
         var vid = match[1];
-        if (vid === activeConnectedVid || isConnecting) return;
+
+        // Also clean up any legacy native video tag
+        var oldNative = document.getElementById('chronos-native-video');
+        if (oldNative) oldNative.remove();
 
         var mp = document.getElementById('movie_player');
         var parent = (mp && mp.parentElement) ? mp.parentElement :
@@ -217,78 +221,36 @@ bool WebView::create(HWND parent, const RECT& bounds) {
                       document.querySelector('ytd-player'));
         if (!parent) return;
 
-        isConnecting = true;
-        var payload = {
-          context: {
-            client: {
-              clientName: 'ANDROID',
-              clientVersion: '21.26.364',
-              androidSdkVersion: 30,
-              userAgent: 'com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip',
-              osName: 'Android',
-              osVersion: '11',
-              hl: 'en',
-              timeZone: 'UTC',
-              utcOffsetMinutes: 0
-            }
-          },
-          videoId: vid,
-          playbackContext: { contentPlaybackContext: { html5Preference: 'HTML5_PREF_WANTS' } },
-          contentCheckOk: true,
-          racyCheckOk: true
-        };
+        if (vid === activeConnectedVid && document.getElementById('chronos-yt-embed')) return;
+        activeConnectedVid = vid;
 
-        fetch('https://www.youtube.com/youtubei/v1/player', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-YouTube-Client-Name': '3',
-            'X-YouTube-Client-Version': '21.26.364'
-          },
-          body: JSON.stringify(payload)
-        })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          var formats = data && data.streamingData && data.streamingData.formats;
-          if (formats && formats.length > 0) {
-            var best = formats.find(function(f) { return f.itag === 22 && f.url; }) ||
-                       formats.find(function(f) { return f.url; }) ||
-                       formats[0];
-            if (best && best.url) {
-              var streamUrl = best.url;
-              activeConnectedVid = vid;
+        if (mp) {
+          try {
+            if (typeof mp.stopVideo === 'function') mp.stopVideo();
+            else if (typeof mp.pauseVideo === 'function') mp.pauseVideo();
+          } catch(e) {}
+          mp.style.setProperty('display', 'none', 'important');
+        }
 
-              var curMp = document.getElementById('movie_player');
-              if (curMp) curMp.style.setProperty('display', 'none', 'important');
-
-              var video = document.getElementById('chronos-native-video');
-              if (!video) {
-                video = document.createElement('video');
-                video.id = 'chronos-native-video';
-                video.controls = true;
-                video.autoplay = true;
-                video.playsInline = true;
-                video.style.cssText = 'width:100%;height:100%;min-height:460px;background:#000;border-radius:12px;outline:none;object-fit:contain;position:relative;z-index:9999;display:block;';
-                parent.insertBefore(video, parent.firstChild);
-              }
-              if (video.src !== streamUrl) {
-                video.src = streamUrl;
-                video.load();
-                video.play().catch(function() {});
-              }
-            }
-          }
-        })
-        .catch(function(err) {})
-        .finally(function() {
-          isConnecting = false;
-        });
+        var embed = document.getElementById('chronos-yt-embed');
+        if (!embed) {
+          embed = document.createElement('iframe');
+          embed.id = 'chronos-yt-embed';
+          embed.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+          embed.setAttribute('allowfullscreen', 'true');
+          embed.style.cssText = 'width:100%;height:100%;min-height:480px;aspect-ratio:16/9;border:none;border-radius:12px;background:#000;display:block;position:relative;z-index:9999;';
+          parent.insertBefore(embed, parent.firstChild);
+        }
+        var targetSrc = 'https://www.youtube.com/embed/' + vid + '?autoplay=1&enablejsapi=1&rel=0&modestbranding=1&playsinline=1';
+        if (embed.getAttribute('src') !== targetSrc) {
+          embed.src = targetSrc;
+        }
       }
 
       window.addEventListener('yt-navigate-finish', checkWatchPage);
       window.addEventListener('popstate', checkWatchPage);
       document.addEventListener('DOMContentLoaded', checkWatchPage);
-      setInterval(checkWatchPage, 750);
+      setInterval(checkWatchPage, 800);
     }
   } catch(e) {}
 })();
