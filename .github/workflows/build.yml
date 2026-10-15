@@ -1,0 +1,58 @@
+name: Build Safari for Windows
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            src-tauri/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^1.5" --locked
+
+      - name: Build Windows Executable
+        run: cargo tauri build --no-bundle
+
+      - name: Archive Safari Build
+        run: |
+          mkdir dist-package
+          copy src-tauri\target\release\Safari.exe dist-package\
+          Compress-Archive -Path dist-package\* -DestinationPath Safari-Windows-x64.zip
+
+      - name: Upload Safari Windows x64 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: safari-windows-x64
+          path: Safari-Windows-x64.zip
+          retention-days: 90

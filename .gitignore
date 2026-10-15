@@ -1,0 +1,7 @@
+target/
+src-tauri/target/
+dist-package/
+Safari-Windows-x64.zip
+__pycache__/
+*.log
+.DS_Store
