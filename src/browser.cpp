@@ -5,8 +5,11 @@
 #include "settings_page.h"
 #include "downloads_page.h"
 #include <gdiplus.h>
+#include <shellapi.h>
 #include <algorithm>
 #include <cstdio>
+
+#pragma comment(lib, "shell32.lib")
 
 namespace safari {
 
