@@ -1,9 +1,11 @@
-target/
-src-tauri/target/
-dist-package/
-Safari-Windows-x64.zip
-__pycache__/
+build/
 bin/
 obj/
+dist/
+sdk/
+sdk-dl/
+*.zip
 *.log
 .DS_Store
+.vs/
+*.user

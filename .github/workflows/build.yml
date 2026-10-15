@@ -1,4 +1,4 @@
-name: Build Safari for Windows
+name: Build Safari for Windows (WebKit)
 
 on:
   push:
@@ -7,31 +7,59 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-
-      - name: Restore dependencies
-        run: dotnet restore SafariApp.csproj
-
-      - name: Build and Publish Standalone Release
+      - name: Download WebKit SDK
+        shell: powershell
         run: |
-          dotnet publish SafariApp.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish-output
+          New-Item -ItemType Directory -Force -Path sdk-dl | Out-Null
+          Write-Host "Downloading WebKit WinCairo SDK release..."
+          try {
+            gh release download webkit-sdk-7c3fb01227f0 --repo Experimental1X/Lumen-webkit --pattern "webkit-sdk-win-x64.zip" --dir sdk-dl --clobber
+          } catch {
+            Write-Host "gh download fallback to curl..."
+            curl.exe -L -f -o sdk-dl/webkit-sdk-win-x64.zip "https://github.com/Experimental1X/Lumen-webkit/releases/download/webkit-sdk-7c3fb01227f0/webkit-sdk-win-x64.zip"
+          }
+          if (-not (Test-Path "sdk-dl\webkit-sdk-win-x64.zip")) {
+            curl.exe -L -f -o sdk-dl/webkit-sdk-win-x64.zip "https://github.com/Experimental1X/Lumen-webkit/releases/download/webkit-sdk-7c3fb01227f0/webkit-sdk-win-x64.zip"
+          }
+          Expand-Archive -Path sdk-dl\webkit-sdk-win-x64.zip -DestinationPath sdk -Force
+          Get-ChildItem sdk
+          if (-not (Test-Path "sdk\lib\WebKit2.lib")) { throw "WebKit2.lib missing in SDK" }
 
-      - name: Archive Safari Build
+      - name: Configure CMake
+        shell: powershell
         run: |
-          Compress-Archive -Path publish-output\* -DestinationPath Safari-Windows-x64.zip
+          cmake -S . -B build -A x64 "-DWEBKIT_SDK_DIR=$env:GITHUB_WORKSPACE\sdk" -DSAFARI_COPY_RUNTIME=OFF
+          if ($LASTEXITCODE -ne 0) { throw "CMake configure failed." }
 
-      - name: Upload Safari Windows x64 Artifact
+      - name: Build Safari Release
+        shell: powershell
+        run: |
+          cmake --build build --config Release
+          if ($LASTEXITCODE -ne 0) { throw "Build failed." }
+
+      - name: Package Safari with WebKit Runtime
+        shell: powershell
+        run: |
+          $dist = "dist\Safari"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item -Path "sdk\runtime\*" -Destination $dist -Recurse -Force
+          Copy-Item -Path "build\Release\Safari.exe" -Destination $dist -Force
+          Compress-Archive -Path "$dist\*" -DestinationPath "Safari-Windows-x64.zip" -Force
+          Write-Host "Archive created: Safari-Windows-x64.zip"
+
+      - name: Upload Safari WebKit Artifact
         uses: actions/upload-artifact@v4
         with:
           name: safari-windows-x64
