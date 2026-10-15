@@ -133,8 +133,15 @@ void Browser::createTab(const std::wstring& url) {
     viewPtr->onUrlChanged = [this, viewPtr](const std::wstring& newUrl) {
         int idx = findTabIndex(viewPtr);
         if (idx >= 0 && (size_t)idx < m_tabs.size()) {
+            if (m_tabs[idx].url == newUrl && !newUrl.contains(L"?")) {
+                return;
+            }
             if (newUrl.starts_with(L"chronos:") || newUrl.starts_with(L"safari:")) {
-                handleInternalUrl((size_t)idx, newUrl);
+                if (newUrl.find(L"?") != std::wstring::npos ||
+                    newUrl == L"chronos:clear" || newUrl == L"safari:clear" ||
+                    m_tabs[idx].url != newUrl) {
+                    handleInternalUrl((size_t)idx, newUrl);
+                }
                 return;
             }
             m_tabs[idx].url = newUrl;
@@ -149,7 +156,14 @@ void Browser::createTab(const std::wstring& url) {
         int idx = findTabIndex(viewPtr);
         if (idx >= 0 && (size_t)idx < m_tabs.size()) {
             m_tabs[idx].isLoading = loading;
-            InvalidateRect(m_hwnd, nullptr, FALSE);
+            if (m_activeTab == (size_t)idx) {
+                if (loading) {
+                    SetTimer(m_hwnd, 2002, 60, nullptr);
+                } else {
+                    KillTimer(m_hwnd, 2002);
+                }
+                InvalidateRect(m_hwnd, &m_addressBarRect, FALSE);
+            }
         }
     };
 
@@ -192,6 +206,12 @@ void Browser::selectTab(size_t index) {
     if (m_tabs[m_activeTab].webView) {
         m_tabs[m_activeTab].webView->setVisible(true);
         m_tabs[m_activeTab].webView->setFocus();
+    }
+
+    if (m_tabs[m_activeTab].isLoading) {
+        SetTimer(m_hwnd, 2002, 60, nullptr);
+    } else {
+        KillTimer(m_hwnd, 2002);
     }
 
     SetWindowTextW(m_hwnd, (m_tabs[m_activeTab].title + L" — Chronos").c_str());
@@ -296,18 +316,21 @@ void Browser::handleInternalUrl(size_t tabIdx, const std::wstring& target) {
         return;
     }
     if (target == L"chronos:start" || target == L"safari:start") {
+        if (m_tabs[tabIdx].url == target && m_tabs[tabIdx].title == L"Start Page") return;
         m_tabs[tabIdx].title = L"Start Page";
         m_tabs[tabIdx].url = target;
         m_tabs[tabIdx].webView->loadHtml(getStartPageHtml(), "chronos:start");
         return;
     }
     if (target == L"chronos:settings" || target == L"safari:settings") {
+        if (m_tabs[tabIdx].url == target && m_tabs[tabIdx].title == L"Settings") return;
         m_tabs[tabIdx].title = L"Settings";
         m_tabs[tabIdx].url = target;
         m_tabs[tabIdx].webView->loadHtml(getSettingsPageHtml(), "chronos:settings");
         return;
     }
     if (target == L"chronos:downloads" || target == L"safari:downloads") {
+        if (m_tabs[tabIdx].url == target && m_tabs[tabIdx].title == L"Downloads") return;
         m_tabs[tabIdx].title = L"Downloads";
         m_tabs[tabIdx].url = target;
         m_tabs[tabIdx].webView->loadHtml(getDownloadsPageHtml(), "chronos:downloads");
@@ -455,11 +478,11 @@ void Browser::updateLayout() {
 
         int totalSegW = sbW - 24;
         int segW = (totalSegW - 8) / 3;
-        m_segBookmarksRect = RECT{ 12, 96, 12 + segW, 124 };
-        m_segReadingRect   = RECT{ 16 + segW, 96, 16 + segW * 2, 124 };
-        m_segHistoryRect   = RECT{ 20 + segW * 2, 96, sbW - 12, 124 };
-        m_sidebarSearchRect = RECT{ 12, 132, sbW - 12, 160 };
-        m_btnClearHistoryRect = RECT{ 14, 166, 120, 186 };
+        m_segBookmarksRect = RECT{ 12, 96, 14 + segW + 2, 126 };
+        m_segReadingRect   = RECT{ 14 + segW + 2, 96, 14 + segW * 2 + 4, 126 };
+        m_segHistoryRect   = RECT{ 14 + segW * 2 + 4, 96, sbW - 12, 126 };
+        m_sidebarSearchRect = RECT{ 12, 132, sbW - 12, 162 };
+        m_btnClearHistoryRect = RECT{ sbW - 110, 168, sbW - 14, 192 };
         m_btnSettings = RECT{ 12, height - 44, sbW - 12, height - 10 };
     } else {
         m_sidebarRect = {};
@@ -521,9 +544,13 @@ void Browser::paintTopChrome(Gdiplus::Graphics& g, int width) {
     g.FillEllipse(&maxBrush, m_btnTrafficMax.left, m_btnTrafficMax.top, 12, 12);
 
     // Sidebar Toggle Icon
-    Gdiplus::Pen iconPen(colors::TextSecondary, 1.5f);
-    g.DrawRectangle(&iconPen, (int)m_btnSidebarToggle.left + 7, (int)m_btnSidebarToggle.top + 8, 18, 14);
-    g.DrawLine(&iconPen, (int)m_btnSidebarToggle.left + 13, (int)m_btnSidebarToggle.top + 8, (int)m_btnSidebarToggle.left + 13, (int)m_btnSidebarToggle.top + 22);
+    if (m_hoverSidebar) {
+        Gdiplus::SolidBrush hoverBg(Gdiplus::Color(255, 48, 48, 54));
+        fillRoundedRect(g, hoverBg, Gdiplus::RectF((float)m_btnSidebarToggle.left, (float)m_btnSidebarToggle.top, 32.0f, 32.0f), 6.0f);
+    }
+    Gdiplus::Pen iconPen(m_hoverSidebar ? colors::TextPrimary : colors::TextSecondary, 1.5f);
+    g.DrawRectangle(&iconPen, (int)m_btnSidebarToggle.left + 7, (int)m_btnSidebarToggle.top + 9, 18, 14);
+    g.DrawLine(&iconPen, (int)m_btnSidebarToggle.left + 13, (int)m_btnSidebarToggle.top + 9, (int)m_btnSidebarToggle.left + 13, (int)m_btnSidebarToggle.top + 23);
 
     // Back / Forward Capsule
     Gdiplus::SolidBrush navBg(colors::AddressBg);
@@ -574,9 +601,13 @@ void Browser::paintTopChrome(Gdiplus::Graphics& g, int width) {
     g.DrawArc(&reloadPen, (float)m_btnReload.left + 6.0f, (float)m_btnReload.top + 6.0f, 13.0f, 13.0f, 45.0f, 270.0f);
 
     // Loading Progress Bar
-    if (m_activeTab < m_tabs.size() && m_tabs[m_activeTab].isLoading) {
+    if (m_activeTab < m_tabs.size() && m_tabs[m_activeTab].isLoading && m_tabs[m_activeTab].webView) {
+        double prog = m_tabs[m_activeTab].webView->estimatedProgress();
+        if (prog < 0.08) prog = 0.08;
+        if (prog > 1.0) prog = 1.0;
+        int barWidth = (int)((addrRectF.Width - 16.0f) * (float)prog);
         Gdiplus::SolidBrush progBrush(colors::AccentBlue);
-        g.FillRectangle(&progBrush, (int)addrRectF.X + 8, (int)addrRectF.Y + (int)addrRectF.Height - 3, (int)addrRectF.Width - 16, 2);
+        g.FillRectangle(&progBrush, (int)addrRectF.X + 8, (int)addrRectF.Y + (int)addrRectF.Height - 3, barWidth, 2);
     }
 
     // Right Action Buttons
@@ -1199,24 +1230,34 @@ void Browser::onMouseDown(POINT pt) {
 
         // Bookmark list item click
         if (m_activeSidebarTab == SidebarTab::Bookmarks) {
-            int curY = 168;
+            int curY = 196;
             for (const auto& b : m_bookmarks) {
-                RECT r{ 12, curY, m_sidebarWidth - 12, curY + 30 };
+                RECT r{ 12, curY, m_sidebarWidth - 12, curY + 32 };
                 if (PtInRect(&r, pt)) {
                     navigate(b.url);
                     return;
                 }
-                curY += 32;
+                curY += 34;
+            }
+        } else if (m_activeSidebarTab == SidebarTab::ReadingList) {
+            int curY = 196;
+            for (const auto& r : m_readingList) {
+                RECT rect{ 12, curY, m_sidebarWidth - 12, curY + 54 };
+                if (PtInRect(&rect, pt)) {
+                    navigate(r.url);
+                    return;
+                }
+                curY += 58;
             }
         } else if (m_activeSidebarTab == SidebarTab::History) {
-            int curY = 192;
+            int curY = 196;
             for (const auto& h : m_history) {
-                RECT r{ 12, curY, m_sidebarWidth - 12, curY + 22 };
+                RECT r{ 12, curY, m_sidebarWidth - 12, curY + 28 };
                 if (PtInRect(&r, pt)) {
                     navigate(h.url);
                     return;
                 }
-                curY += 24;
+                curY += 30;
             }
         }
     }
@@ -1339,6 +1380,14 @@ LRESULT CALLBACK Browser::editSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, L
     }
 
     return CallWindowProcW(self->m_origEditProc, hwnd, msg, wParam, lParam);
+}
+
+void Browser::onProgressTimer() {
+    if (m_activeTab < m_tabs.size() && m_tabs[m_activeTab].isLoading) {
+        InvalidateRect(m_hwnd, &m_addressBarRect, FALSE);
+    } else {
+        KillTimer(m_hwnd, 2002);
+    }
 }
 
 } // namespace safari

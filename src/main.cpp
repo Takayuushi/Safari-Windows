@@ -145,11 +145,25 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
         break;
 
+    case WM_CTLCOLOREDIT: {
+        HDC hdcEdit = (HDC)wParam;
+        SetTextColor(hdcEdit, RGB(255, 255, 255));
+        SetBkColor(hdcEdit, RGB(28, 28, 30));
+        static HBRUSH s_editBrush = CreateSolidBrush(RGB(28, 28, 30));
+        return (LRESULT)s_editBrush;
+    }
+
     case WM_TIMER:
         if (wParam == 2001) {
             KillTimer(hwnd, 2001);
             if (g_browser && g_browser->isDownloadsPopoverOpen()) {
                 g_browser->toggleDownloadsPopover();
+            }
+            return 0;
+        }
+        if (wParam == 2002) {
+            if (g_browser) {
+                g_browser->onProgressTimer();
             }
             return 0;
         }

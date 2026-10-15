@@ -7,6 +7,10 @@
 #include <WebKit/WKPageGroup.h>
 #include <WebKit/WKPageConfigurationRef.h>
 #include <WebKit/WKPreferencesRef.h>
+#include <WebKit/WKPreferencesRefPrivate.h>
+#include <WebKit/WKUserScriptRef.h>
+#include <WebKit/WKUserContentControllerRef.h>
+#include <WebKit/WKUserScriptInjectionTime.h>
 #include <WebKit/WKURL.h>
 #include <WebKit/WKString.h>
 #include <WebKit/WKType.h>
@@ -55,6 +59,17 @@ bool WebKitHost::initialize() {
         WKPreferencesSetWebAudioEnabled(m_preferences, true);
         WKPreferencesSetMediaCapabilitiesEnabled(m_preferences, true);
         WKPreferencesSetAllowMediaContentTypesRequiringHardwareSupportAsFallback(m_preferences, true);
+
+        // Media Source Extensions (MSE) & Video Playback configuration for YouTube / HTML5 streaming
+        WKPreferencesSetMediaSourceEnabled(m_preferences, true);
+        WKPreferencesSetMediaPlaybackAllowsInline(m_preferences, true);
+        WKPreferencesSetInlineMediaPlaybackRequiresPlaysInlineAttribute(m_preferences, false);
+        WKPreferencesSetMediaPlaybackRequiresUserGesture(m_preferences, false);
+        WKPreferencesSetVideoPlaybackRequiresUserGesture(m_preferences, false);
+        WKPreferencesSetAudioPlaybackRequiresUserGesture(m_preferences, false);
+        WKPreferencesSetAllowsPictureInPictureMediaPlayback(m_preferences, true);
+        WKPreferencesSetMediaPreloadingEnabled(m_preferences, true);
+        WKPreferencesSetInvisibleMediaAutoplayPermitted(m_preferences, true);
     }
 
     // Set up Download Client to save files to Downloads folder
@@ -135,6 +150,49 @@ bool WebView::create(HWND parent, const RECT& bounds) {
     WKPageConfigurationSetContext(pageConfig, host.context());
     WKPageConfigurationSetPageGroup(pageConfig, host.pageGroup());
 
+    // Inject MSE compatibility shim so YouTube selects standard H.264 (avc1) / AAC (mp4a) Media Foundation streams
+    WKUserContentControllerRef userContent = WKPageConfigurationGetUserContentController(pageConfig);
+    bool createdUserContent = false;
+    if (!userContent) {
+        userContent = WKUserContentControllerCreate();
+        WKPageConfigurationSetUserContentController(pageConfig, userContent);
+        createdUserContent = true;
+    }
+
+    const char* shimJs =
+        "(function() {"
+        "  try {"
+        "    if (typeof window.MediaSource !== 'undefined') {"
+        "      var origIsTypeSupported = window.MediaSource.isTypeSupported.bind(window.MediaSource);"
+        "      window.MediaSource.isTypeSupported = function(type) {"
+        "        if (!type) return false;"
+        "        var l = type.toLowerCase();"
+        "        if (l.indexOf('avc1') !== -1 || l.indexOf('mp4a') !== -1 || l.indexOf('h264') !== -1 || l.indexOf('aac') !== -1) return true;"
+        "        return origIsTypeSupported(type);"
+        "      };"
+        "    }"
+        "    if (window.HTMLMediaElement && window.HTMLMediaElement.prototype.canPlayType) {"
+        "      var origCanPlay = window.HTMLMediaElement.prototype.canPlayType;"
+        "      window.HTMLMediaElement.prototype.canPlayType = function(type) {"
+        "        if (!type) return '';"
+        "        var l = type.toLowerCase();"
+        "        if (l.indexOf('avc1') !== -1 || l.indexOf('mp4a') !== -1 || l.indexOf('video/mp4') !== -1 || l.indexOf('audio/mp4') !== -1) return 'probably';"
+        "        return origCanPlay.call(this, type);"
+        "      };"
+        "    }"
+        "  } catch(e) {}"
+        "})();";
+
+    WKStringRef scriptStr = WKStringCreateWithUTF8CString(shimJs);
+    WKUserScriptRef userScript = WKUserScriptCreateWithSource(scriptStr, kWKInjectAtDocumentStart, false);
+    WKUserContentControllerAddUserScript(userContent, userScript);
+    WKRelease(userScript);
+    WKRelease(scriptStr);
+
+    if (createdUserContent) {
+        WKRelease(userContent);
+    }
+
     m_view = WKViewCreate(bounds, pageConfig, parent);
     WKRelease(pageConfig);
 
@@ -142,9 +200,9 @@ bool WebView::create(HWND parent, const RECT& bounds) {
 
     m_page = WKViewGetPage(m_view);
 
-    // Desktop User-Agent for seamless YouTube HTML5 video playback
+    // Desktop Safari User-Agent so YouTube and web services deliver native Safari H.264 streams
     WKStringRef ua = WKStringCreateWithUTF8CString(
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15"
     );
     WKPageSetCustomUserAgent(m_page, ua);
     WKRelease(ua);
@@ -306,6 +364,12 @@ void WebView::decidePolicyForResponse(WKPageRef, WKFrameRef, WKURLResponseRef re
     if (urlStr) WKRelease(urlStr);
     if (urlRef) WKRelease(urlRef);
 
+    // Internal pages must never be treated as downloads
+    if (url.starts_with(L"chronos:") || url.starts_with(L"safari:") || url.starts_with(L"about:")) {
+        WKFramePolicyListenerUse(listener);
+        return;
+    }
+
     std::wstring lower = url;
     std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
 
@@ -334,17 +398,17 @@ void WebView::didStartProvisionalNavigation(WKPageRef page, WKNavigationRef, WKT
     self->m_isLoading = true;
     if (self->onLoadingChanged) self->onLoadingChanged(true);
 
+    // Only dispatch provisional navigation URL updates for internal action commands (e.g. chronos:pause?id=...)
+    // so they can be intercepted immediately. Regular URLs update on commit/finish, eliminating infinite reloads.
     WKURLRef provRef = WKPageCopyProvisionalURL(page);
     if (provRef) {
         WKStringRef strRef = WKURLCopyString(provRef);
         std::wstring provUrl = wkStringToWString(strRef);
         if (strRef) WKRelease(strRef);
         WKRelease(provRef);
-        if (!provUrl.empty() && self->onUrlChanged) {
+        if (!provUrl.empty() && provUrl.find(L"?") != std::wstring::npos && self->onUrlChanged) {
             self->onUrlChanged(provUrl);
         }
-    } else {
-        if (self->onUrlChanged) self->onUrlChanged(self->url());
     }
 
     if (self->onNavStateChanged) self->onNavStateChanged();
@@ -371,6 +435,27 @@ void WebView::didFailNavigation(WKPageRef, WKNavigationRef, WKErrorRef, WKTypeRe
     self->m_isLoading = false;
     if (self->onLoadingChanged) self->onLoadingChanged(false);
     if (self->onNavStateChanged) self->onNavStateChanged();
+
+    // Render a polished Safari-styled error page for failed web navigations
+    std::wstring curUrl = self->url();
+    if (!curUrl.empty() && (curUrl.starts_with(L"http://") || curUrl.starts_with(L"https://"))) {
+        std::string errHtml =
+            "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+            "<style>"
+            "body{background:#1c1c1e;color:#f5f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI Variable Text',sans-serif;"
+            "display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:85vh;margin:0;user-select:none;}"
+            ".icon{font-size:44px;margin-bottom:18px;opacity:0.7;}"
+            "h1{font-size:22px;font-weight:600;margin:0 0 10px;}"
+            "p{font-size:14px;color:#8e8e93;max-width:440px;text-align:center;line-height:1.5;margin:0 0 24px;}"
+            ".btn{background:#007aff;color:#fff;padding:8px 22px;border-radius:8px;font-size:14px;text-decoration:none;font-weight:500;}"
+            "</style></head><body>"
+            "<div class='icon'>⚠️</div>"
+            "<h1>Safari Can't Open the Page</h1>"
+            "<p>The page could not be opened because the server stopped responding or the network connection was interrupted.</p>"
+            "<a class='btn' href='javascript:location.reload()'>Try Again</a>"
+            "</body></html>";
+        self->loadHtml(errHtml, toUtf8(curUrl));
+    }
 }
 
 } // namespace safari

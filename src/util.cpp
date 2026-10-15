@@ -67,6 +67,8 @@ std::wstring normalizeInput(const std::wstring& input) {
     if (trimmed.empty()) return L"chronos:start";
     if (trimmed == L"chronos:start" || trimmed == L"safari:start" || trimmed == L"about:blank") return L"chronos:start";
     if (trimmed == L"chronos:settings" || trimmed == L"safari:settings" || trimmed == L"settings") return L"chronos:settings";
+    if (trimmed == L"chronos:downloads" || trimmed == L"safari:downloads" || trimmed == L"downloads") return L"chronos:downloads";
+    if (trimmed.starts_with(L"chronos:") || trimmed.starts_with(L"safari:")) return trimmed;
 
     if (trimmed.rfind(L"http://", 0) == 0 || trimmed.rfind(L"https://", 0) == 0) {
         return trimmed;

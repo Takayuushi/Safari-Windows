@@ -73,6 +73,7 @@ public:
 
     bool isHitInteractive(POINT pt) const;
     bool onSetCursor();
+    void onProgressTimer();
     HWND window() const { return m_hwnd; }
 
 private:
