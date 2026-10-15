@@ -8,6 +8,7 @@
 #include <WebKit/WKPreferencesRef.h>
 #include <WebKit/WKURL.h>
 #include <WebKit/WKString.h>
+#include <WebKit/WKType.h>
 #include <WebKit/WKErrorRef.h>
 
 namespace safari {
@@ -44,7 +45,6 @@ bool WebKitHost::initialize() {
     if (m_preferences) {
         WKPreferencesSetDeveloperExtrasEnabled(m_preferences, true);
         WKPreferencesSetJavaScriptEnabled(m_preferences, true);
-        WKPreferencesSetDOMPasteAllowed(m_preferences, true);
     }
 
     m_initialized = true;

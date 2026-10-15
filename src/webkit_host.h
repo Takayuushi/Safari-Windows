@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <WebKit/WKBase.h>
 #include <WebKit/WKBaseWin.h>
+#include <WebKit/WKType.h>
 #include <string>
 #include <functional>
 #include <memory>
