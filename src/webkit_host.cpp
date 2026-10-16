@@ -187,8 +187,10 @@ bool WebView::create(HWND parent, const RECT& bounds) {
       }
     } catch(fe) {}
 
-    // 3. Apple HLS & H.264/AAC Media Capabilities routing
-    // Block WebM/VP8/VP9/AV1 so YouTube selects Apple HLS & H.264 streams
+    // 3. Hardware-Accelerated H.264 & AAC Media Capabilities routing for Windows Media Foundation
+    // Tell media players to select standard H.264 MP4 streams.
+    // Block WebM/VP8/VP9/AV1 which Media Foundation cannot decode without specialized codecs.
+    // Do NOT return 'probably' for HLS/m3u8, avoiding unsupported dynamic byte stream errors on Windows.
     if (window.HTMLMediaElement && window.HTMLMediaElement.prototype.canPlayType) {
       var origCanPlay = window.HTMLMediaElement.prototype.canPlayType;
       window.HTMLMediaElement.prototype.canPlayType = function(type) {
@@ -197,10 +199,7 @@ bool WebView::create(HWND parent, const RECT& bounds) {
         if (l.indexOf('webm') !== -1 || l.indexOf('vp8') !== -1 || l.indexOf('vp9') !== -1 || l.indexOf('av01') !== -1 || l.indexOf('av1') !== -1) {
           return '';
         }
-        if (l.indexOf('mpegurl') !== -1 || l.indexOf('m3u8') !== -1 ||
-            l.indexOf('avc1') !== -1 || l.indexOf('mp4a') !== -1 ||
-            l.indexOf('video/mp4') !== -1 || l.indexOf('audio/mp4') !== -1 ||
-            l.indexOf('audio/x-m4a') !== -1 || l.indexOf('audio/aac') !== -1) {
+        if (l.indexOf('avc1') !== -1 || l.indexOf('mp4a') !== -1 || l.indexOf('video/mp4') !== -1 || l.indexOf('audio/mp4') !== -1 || l.indexOf('audio/x-m4a') !== -1 || l.indexOf('audio/aac') !== -1) {
           return 'probably';
         }
         return origCanPlay.call(this, type);
@@ -215,7 +214,7 @@ bool WebView::create(HWND parent, const RECT& bounds) {
           if (ct.indexOf('webm') !== -1 || ct.indexOf('vp8') !== -1 || ct.indexOf('vp9') !== -1 || ct.indexOf('av01') !== -1 || ct.indexOf('av1') !== -1) {
             return Promise.resolve({ supported: false, smooth: false, powerEfficient: false });
           }
-          if (ct.indexOf('mpegurl') !== -1 || ct.indexOf('avc1') !== -1 || ct.indexOf('mp4') !== -1) {
+          if (ct.indexOf('avc1') !== -1 || ct.indexOf('mp4') !== -1) {
             return Promise.resolve({ supported: true, smooth: true, powerEfficient: true });
           }
         }
@@ -223,82 +222,94 @@ bool WebView::create(HWND parent, const RECT& bounds) {
       };
     }
 
-    // 4. YouTube Safari watch player watchdog & HLS stream activation
+    // 4. Option B: Clean YouTube Mobile & Embedded Player Routing
     if (window.location && window.location.hostname && window.location.hostname.indexOf('youtube.com') !== -1) {
-      function cleanLegacy() {
-        var oldP = document.getElementById('chronos-yt-embed');
-        if (oldP) oldP.remove();
-        var oldNative = document.getElementById('chronos-native-video');
-        if (oldNative) oldNative.remove();
-        var mp = document.getElementById('movie_player');
-        if (mp && mp.style.display === 'none') {
-          mp.style.display = '';
-        }
+      // If already on a dedicated embed page, let it play naturally
+      if (window.location.pathname.indexOf('/embed/') === 0) return;
+
+      function extractVideoId() {
+        try {
+          var u = new URL(window.location.href);
+          if (u.searchParams && u.searchParams.has('v')) {
+            return u.searchParams.get('v');
+          }
+          if (u.pathname.indexOf('/shorts/') === 0) {
+            return u.pathname.substring(8).split('?')[0];
+          }
+        } catch(e) {}
+        var m = window.location.href.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+        return m ? m[1] : null;
       }
 
-      function activateHlsPlayer() {
-        cleanLegacy();
-        var v = document.querySelector('#movie_player video, video.html5-main-video');
-        if (!v) return;
+      function injectCleanPlayer() {
+        var vid = extractVideoId();
+        if (!vid) return;
 
-        // Auto-skip ads
-        var skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button');
-        if (skipBtn) {
-          skipBtn.click();
-          return;
-        }
-        var adShowing = document.querySelector('.ad-showing, .ad-interrupting');
-        if (adShowing) {
-          if (isFinite(v.duration) && v.duration > 0 && v.currentTime < v.duration) {
-            v.currentTime = v.duration;
+        // Locate video player container on mobile (m.youtube.com) or desktop
+        var container = document.querySelector(
+          '.player-container, #player, ytm-player, #player-container-id, #movie_player, .html5-video-player'
+        );
+        if (!container) return;
+
+        var existing = document.getElementById('chronos-clean-embed');
+        if (existing) {
+          if (existing.getAttribute('data-vid') === vid) {
+            return;
           }
-          var closeBtn = document.querySelector('.ytp-ad-overlay-close-button');
-          if (closeBtn) closeBtn.click();
-          return;
+          existing.remove();
         }
 
-        // If the video tag doesn't have a valid playable source, wire up the HLS manifest URL from YouTube
-        if (!v.src || v.src.indexOf('blob:') === 0 || v.networkState === 3) {
-          var hlsUrl = null;
+        if (window.getComputedStyle(container).position === 'static') {
+          container.style.position = 'relative';
+        }
+
+        // Mute / pause any underlying native video element that failed
+        var videos = container.querySelectorAll('video');
+        videos.forEach(function(v) {
           try {
-            if (window.ytInitialPlayerResponse && window.ytInitialPlayerResponse.streamingData) {
-              hlsUrl = window.ytInitialPlayerResponse.streamingData.hlsManifestUrl;
-            }
-            if (!hlsUrl) {
-              var mp = document.getElementById('movie_player');
-              if (mp && typeof mp.getPlayerResponse === 'function') {
-                var pr = mp.getPlayerResponse();
-                if (pr && pr.streamingData) hlsUrl = pr.streamingData.hlsManifestUrl;
-              }
-            }
+            v.pause();
+            v.style.display = 'none';
           } catch(e) {}
+        });
 
-          if (hlsUrl && v.src !== hlsUrl) {
-            v.src = hlsUrl;
-            v.load();
-            v.play().catch(function() {});
-          }
-        }
+        // Hide broken error screens
+        var errOverlays = container.querySelectorAll('.ytp-error, .ytp-error-screen, .ytp-cued-thumbnail-overlay');
+        errOverlays.forEach(function(el) {
+          try { el.style.display = 'none'; } catch(e) {}
+        });
+
+        var wrap = document.createElement('div');
+        wrap.id = 'chronos-clean-embed';
+        wrap.setAttribute('data-vid', vid);
+        wrap.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;z-index:9999;background:#000;display:flex;flex-direction:column;';
+
+        var topControls = document.createElement('div');
+        topControls.style.cssText = 'position:absolute;top:8px;right:12px;z-index:10001;display:flex;gap:8px;';
+
+        var theaterBtn = document.createElement('a');
+        theaterBtn.href = 'https://www.youtube.com/embed/' + vid + '?autoplay=1';
+        theaterBtn.innerText = '⤢ Full Player';
+        theaterBtn.title = 'Switch to full-window clean player';
+        theaterBtn.style.cssText = 'background:rgba(20,20,20,0.75);color:#fff;padding:5px 12px;border-radius:14px;font-size:12px;text-decoration:none;font-weight:600;font-family:-apple-system,sans-serif;backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.25);box-shadow:0 2px 8px rgba(0,0,0,0.4);';
+        topControls.appendChild(theaterBtn);
+        wrap.appendChild(topControls);
+
+        var ifr = document.createElement('iframe');
+        ifr.id = 'chronos-embed-iframe';
+        ifr.src = 'https://www.youtube.com/embed/' + vid + '?autoplay=1&playsinline=1&enablejsapi=1&rel=0';
+        ifr.style.cssText = 'width:100%;height:100%;border:none;flex:1;';
+        ifr.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share');
+        ifr.setAttribute('allowfullscreen', 'true');
+        wrap.appendChild(ifr);
+
+        container.appendChild(wrap);
       }
 
-      document.addEventListener('click', function(e) {
-        var t = e.target;
-        if (t && (t.closest('#movie_player') || t.closest('.ytp-large-play-button') || t.closest('.ytp-cued-thumbnail-overlay') || t.closest('.html5-video-player'))) {
-          activateHlsPlayer();
-          var mp = document.getElementById('movie_player');
-          if (mp && typeof mp.playVideo === 'function') {
-            try { mp.playVideo(); } catch(err) {}
-          }
-          var v = document.querySelector('#movie_player video, video.html5-main-video');
-          if (v) {
-            try { v.play().catch(function() {}); } catch(err) {}
-          }
-        }
-      }, true);
-
-      setInterval(activateHlsPlayer, 400);
-      window.addEventListener('DOMContentLoaded', activateHlsPlayer);
-      window.addEventListener('yt-navigate-finish', activateHlsPlayer);
+      window.addEventListener('DOMContentLoaded', injectCleanPlayer);
+      window.addEventListener('yt-navigate-finish', injectCleanPlayer);
+      window.addEventListener('yt-page-data-updated', injectCleanPlayer);
+      window.addEventListener('popstate', injectCleanPlayer);
+      setInterval(injectCleanPlayer, 600);
     }
   } catch(e) {}
 })();
@@ -325,13 +336,8 @@ bool WebView::create(HWND parent, const RECT& bounds) {
 
     m_page = WKViewGetPage(m_view);
 
-    // Modern Apple Safari User-Agent (macOS / WebKit)
-    // Instructs YouTube to deliver its standards-compliant WebKit layout and direct Apple HLS streaming manifests
-    WKStringRef ua = WKStringCreateWithUTF8CString(
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15"
-    );
-    WKPageSetCustomUserAgent(m_page, ua);
-    WKRelease(ua);
+    // Initialize custom user agent
+    updateCustomUserAgentForUrl(L"");
 
     setupNavigationClient();
     setupPolicyClient();
@@ -398,9 +404,50 @@ void WebView::setFocus() {
     }
 }
 
+void WebView::updateCustomUserAgentForUrl(const std::wstring& url) {
+    if (!m_page) return;
+    bool isYouTube = (url.find(L"youtube.com") != std::wstring::npos || url.find(L"youtu.be") != std::wstring::npos);
+    if (isYouTube) {
+        // iPad Safari User-Agent: Delivers modern, lightweight HTML5 mobile/tablet layout without broken desktop Polymer Web Components
+        WKStringRef ua = WKStringCreateWithUTF8CString(
+            "Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+        );
+        WKPageSetCustomUserAgent(m_page, ua);
+        WKRelease(ua);
+    } else {
+        // Desktop macOS Safari User-Agent for standard web browsing
+        WKStringRef ua = WKStringCreateWithUTF8CString(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15"
+        );
+        WKPageSetCustomUserAgent(m_page, ua);
+        WKRelease(ua);
+    }
+}
+
 void WebView::loadUrl(const std::wstring& targetUrl) {
     if (!m_page) return;
-    std::string utf8 = toUtf8(targetUrl);
+
+    std::wstring routedUrl = targetUrl;
+
+    // Option B: Clean YouTube Routing
+    // Rewrite desktop YouTube to m.youtube.com for fast, lightweight UI without broken desktop Polymer Web Components
+    if (routedUrl.find(L"www.youtube.com") != std::wstring::npos || routedUrl.find(L"://youtube.com") != std::wstring::npos) {
+        if (routedUrl.find(L"/embed/") == std::wstring::npos) {
+            size_t pos = routedUrl.find(L"www.youtube.com");
+            if (pos != std::wstring::npos) {
+                routedUrl.replace(pos, 15, L"m.youtube.com");
+            } else {
+                pos = routedUrl.find(L"://youtube.com");
+                if (pos != std::wstring::npos) {
+                    routedUrl.replace(pos, 14, L"://m.youtube.com");
+                }
+            }
+        }
+    }
+
+    updateCustomUserAgentForUrl(routedUrl);
+
+    std::string utf8 = toUtf8(routedUrl);
     WKURLRef urlRef = WKURLCreateWithUTF8CString(utf8.c_str());
     WKPageLoadURL(m_page, urlRef);
     WKRelease(urlRef);
@@ -557,6 +604,7 @@ void WebView::didStartProvisionalNavigation(WKPageRef page, WKNavigationRef, WKT
         std::wstring provUrl = wkStringToWString(strRef);
         if (strRef) WKRelease(strRef);
         WKRelease(provRef);
+        self->updateCustomUserAgentForUrl(provUrl);
         if (!provUrl.empty() && provUrl.find(L"?") != std::wstring::npos && self->onUrlChanged) {
             self->onUrlChanged(provUrl);
         }

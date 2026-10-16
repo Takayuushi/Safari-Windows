@@ -76,6 +76,7 @@ private:
 
     void setupNavigationClient();
     void setupPolicyClient();
+    void updateCustomUserAgentForUrl(const std::wstring& url);
 
     static void didStartProvisionalNavigation(WKPageRef page, WKNavigationRef navigation, WKTypeRef userData, const void* clientInfo);
     static void didCommitNavigation(WKPageRef page, WKNavigationRef navigation, WKTypeRef userData, const void* clientInfo);
