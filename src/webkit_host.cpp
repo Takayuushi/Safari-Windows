@@ -169,7 +169,13 @@ bool WebView::create(HWND parent, const RECT& bounds) {
     const char* shimJs = R"js(
 (function() {
   try {
-    // 1. Fullscreen API polyfill
+    // 1. Safari identity polyfill
+    try {
+      Object.defineProperty(navigator, 'vendor', { get: function() { return 'Apple Computer, Inc.'; }, configurable: true });
+      Object.defineProperty(navigator, 'platform', { get: function() { return 'MacIntel'; }, configurable: true });
+    } catch(e) {}
+
+    // 2. Fullscreen API polyfill
     try {
       Object.defineProperty(document, 'fullscreenEnabled', { get: function() { return true; }, configurable: true });
       Object.defineProperty(document, 'webkitFullscreenEnabled', { get: function() { return true; }, configurable: true });
@@ -181,23 +187,8 @@ bool WebView::create(HWND parent, const RECT& bounds) {
       }
     } catch(fe) {}
 
-    // 2. h264ify: Force YouTube & HTML5 players to select hardware-accelerated H.264 (avc1) / AAC (mp4a)
-    // Block VP8, VP9, WebM, and AV1 so YouTube never requests non-H.264 streams
-    if (window.MediaSource && typeof window.MediaSource.isTypeSupported === 'function') {
-      var origIsTypeSupported = window.MediaSource.isTypeSupported.bind(window.MediaSource);
-      window.MediaSource.isTypeSupported = function(type) {
-        if (!type) return false;
-        var l = type.toLowerCase();
-        if (l.indexOf('webm') !== -1 || l.indexOf('vp8') !== -1 || l.indexOf('vp9') !== -1 || l.indexOf('av01') !== -1 || l.indexOf('av1') !== -1) {
-          return false;
-        }
-        if (l.indexOf('mp4') !== -1 || l.indexOf('avc1') !== -1 || l.indexOf('mp4a') !== -1) {
-          return true;
-        }
-        return origIsTypeSupported(type);
-      };
-    }
-
+    // 3. Apple HLS & H.264/AAC Media Capabilities routing
+    // Block WebM/VP8/VP9/AV1 so YouTube selects Apple HLS & H.264 streams
     if (window.HTMLMediaElement && window.HTMLMediaElement.prototype.canPlayType) {
       var origCanPlay = window.HTMLMediaElement.prototype.canPlayType;
       window.HTMLMediaElement.prototype.canPlayType = function(type) {
@@ -206,7 +197,10 @@ bool WebView::create(HWND parent, const RECT& bounds) {
         if (l.indexOf('webm') !== -1 || l.indexOf('vp8') !== -1 || l.indexOf('vp9') !== -1 || l.indexOf('av01') !== -1 || l.indexOf('av1') !== -1) {
           return '';
         }
-        if (l.indexOf('avc1') !== -1 || l.indexOf('mp4a') !== -1 || l.indexOf('video/mp4') !== -1 || l.indexOf('audio/mp4') !== -1) {
+        if (l.indexOf('mpegurl') !== -1 || l.indexOf('m3u8') !== -1 ||
+            l.indexOf('avc1') !== -1 || l.indexOf('mp4a') !== -1 ||
+            l.indexOf('video/mp4') !== -1 || l.indexOf('audio/mp4') !== -1 ||
+            l.indexOf('audio/x-m4a') !== -1 || l.indexOf('audio/aac') !== -1) {
           return 'probably';
         }
         return origCanPlay.call(this, type);
@@ -221,7 +215,7 @@ bool WebView::create(HWND parent, const RECT& bounds) {
           if (ct.indexOf('webm') !== -1 || ct.indexOf('vp8') !== -1 || ct.indexOf('vp9') !== -1 || ct.indexOf('av01') !== -1 || ct.indexOf('av1') !== -1) {
             return Promise.resolve({ supported: false, smooth: false, powerEfficient: false });
           }
-          if (ct.indexOf('avc1') !== -1 || ct.indexOf('mp4') !== -1) {
+          if (ct.indexOf('mpegurl') !== -1 || ct.indexOf('avc1') !== -1 || ct.indexOf('mp4') !== -1) {
             return Promise.resolve({ supported: true, smooth: true, powerEfficient: true });
           }
         }
@@ -229,7 +223,7 @@ bool WebView::create(HWND parent, const RECT& bounds) {
       };
     }
 
-    // 3. YouTube native player watchdog & unblocker
+    // 4. YouTube Safari watch player watchdog & HLS stream activation
     if (window.location && window.location.hostname && window.location.hostname.indexOf('youtube.com') !== -1) {
       function cleanLegacy() {
         var oldP = document.getElementById('chronos-yt-embed');
@@ -242,8 +236,12 @@ bool WebView::create(HWND parent, const RECT& bounds) {
         }
       }
 
-      function autoSkipAds() {
+      function activateHlsPlayer() {
         cleanLegacy();
+        var v = document.querySelector('#movie_player video, video.html5-main-video');
+        if (!v) return;
+
+        // Auto-skip ads
         var skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button');
         if (skipBtn) {
           skipBtn.click();
@@ -251,32 +249,56 @@ bool WebView::create(HWND parent, const RECT& bounds) {
         }
         var adShowing = document.querySelector('.ad-showing, .ad-interrupting');
         if (adShowing) {
-          var v = document.querySelector('#movie_player video, video.html5-main-video');
-          if (v && isFinite(v.duration) && v.duration > 0 && v.currentTime < v.duration) {
+          if (isFinite(v.duration) && v.duration > 0 && v.currentTime < v.duration) {
             v.currentTime = v.duration;
           }
           var closeBtn = document.querySelector('.ytp-ad-overlay-close-button');
           if (closeBtn) closeBtn.click();
+          return;
+        }
+
+        // If the video tag doesn't have a valid playable source, wire up the HLS manifest URL from YouTube
+        if (!v.src || v.src.indexOf('blob:') === 0 || v.networkState === 3) {
+          var hlsUrl = null;
+          try {
+            if (window.ytInitialPlayerResponse && window.ytInitialPlayerResponse.streamingData) {
+              hlsUrl = window.ytInitialPlayerResponse.streamingData.hlsManifestUrl;
+            }
+            if (!hlsUrl) {
+              var mp = document.getElementById('movie_player');
+              if (mp && typeof mp.getPlayerResponse === 'function') {
+                var pr = mp.getPlayerResponse();
+                if (pr && pr.streamingData) hlsUrl = pr.streamingData.hlsManifestUrl;
+              }
+            }
+          } catch(e) {}
+
+          if (hlsUrl && v.src !== hlsUrl) {
+            v.src = hlsUrl;
+            v.load();
+            v.play().catch(function() {});
+          }
         }
       }
 
       document.addEventListener('click', function(e) {
         var t = e.target;
         if (t && (t.closest('#movie_player') || t.closest('.ytp-large-play-button') || t.closest('.ytp-cued-thumbnail-overlay') || t.closest('.html5-video-player'))) {
+          activateHlsPlayer();
           var mp = document.getElementById('movie_player');
           if (mp && typeof mp.playVideo === 'function') {
             try { mp.playVideo(); } catch(err) {}
           }
           var v = document.querySelector('#movie_player video, video.html5-main-video');
-          if (v && v.paused) {
-            try { v.play(); } catch(err) {}
+          if (v) {
+            try { v.play().catch(function() {}); } catch(err) {}
           }
         }
       }, true);
 
-      setInterval(autoSkipAds, 350);
-      window.addEventListener('DOMContentLoaded', cleanLegacy);
-      window.addEventListener('yt-navigate-finish', cleanLegacy);
+      setInterval(activateHlsPlayer, 400);
+      window.addEventListener('DOMContentLoaded', activateHlsPlayer);
+      window.addEventListener('yt-navigate-finish', activateHlsPlayer);
     }
   } catch(e) {}
 })();
@@ -303,10 +325,10 @@ bool WebView::create(HWND parent, const RECT& bounds) {
 
     m_page = WKViewGetPage(m_view);
 
-    // Modern Windows Desktop User-Agent with Safari/WebKit signature
-    // Instructs YouTube to deliver its primary Windows HTML5 player instead of macOS-exclusive FairPlay/AVFoundation code paths
+    // Modern Apple Safari User-Agent (macOS / WebKit)
+    // Instructs YouTube to deliver its standards-compliant WebKit layout and direct Apple HLS streaming manifests
     WKStringRef ua = WKStringCreateWithUTF8CString(
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15"
     );
     WKPageSetCustomUserAgent(m_page, ua);
     WKRelease(ua);
