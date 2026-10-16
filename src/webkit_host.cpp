@@ -222,12 +222,12 @@ bool WebView::create(HWND parent, const RECT& bounds) {
       };
     }
 
-    // 4. Option B: Clean YouTube Mobile & Embedded Player Routing
+    // 4. YouTube Native Direct Stream Player (InnerTube Android Direct 360p/720p Progressive MP4)
     if (window.location && window.location.hostname && window.location.hostname.indexOf('youtube.com') !== -1) {
-      // If already on a dedicated embed page, let it play naturally
-      if (window.location.pathname.indexOf('/embed/') === 0) return;
+      var activeConnectedVid = null;
+      var isConnecting = false;
 
-      function extractVideoId() {
+      function extractVid() {
         try {
           var u = new URL(window.location.href);
           if (u.searchParams && u.searchParams.has('v')) {
@@ -241,75 +241,140 @@ bool WebView::create(HWND parent, const RECT& bounds) {
         return m ? m[1] : null;
       }
 
-      function injectCleanPlayer() {
-        var vid = extractVideoId();
-        if (!vid) return;
+      function checkWatchPage() {
+        var vid = extractVid();
+        if (!vid) {
+          var oldVideo = document.getElementById('chronos-native-video');
+          if (oldVideo) oldVideo.remove();
+          var oldErr = document.getElementById('chronos-error-msg');
+          if (oldErr) oldErr.remove();
+          var mp = document.getElementById('movie_player');
+          if (mp) mp.style.display = '';
+          activeConnectedVid = null;
+          return;
+        }
 
-        // Locate video player container on mobile (m.youtube.com) or desktop
-        var container = document.querySelector(
-          '.player-container, #player, ytm-player, #player-container-id, #movie_player, .html5-video-player'
-        );
+        if (vid === activeConnectedVid || isConnecting) return;
+
+        var container = document.getElementById('player-container') ||
+                        document.getElementById('player') ||
+                        document.querySelector('.player-container') ||
+                        document.querySelector('ytm-player') ||
+                        document.getElementById('movie_player') ||
+                        document.querySelector('ytd-player');
         if (!container) return;
 
-        var existing = document.getElementById('chronos-clean-embed');
-        if (existing) {
-          if (existing.getAttribute('data-vid') === vid) {
+        isConnecting = true;
+        var payload = {
+          context: {
+            client: {
+              clientName: 'ANDROID',
+              clientVersion: '21.26.364',
+              androidSdkVersion: 30,
+              userAgent: 'com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip',
+              osName: 'Android',
+              osVersion: '11',
+              hl: 'en',
+              timeZone: 'UTC',
+              utcOffsetMinutes: 0
+            }
+          },
+          videoId: vid,
+          playbackContext: { contentPlaybackContext: { html5Preference: 'HTML5_PREF_WANTS' } },
+          contentCheckOk: true,
+          racyCheckOk: true
+        };
+
+        fetch('https://www.youtube.com/youtubei/v1/player', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip',
+            'X-YouTube-Client-Name': '3',
+            'X-YouTube-Client-Version': '21.26.364'
+          },
+          body: JSON.stringify(payload)
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          var playability = data && data.playabilityStatus;
+          if (playability && playability.status !== 'OK') {
+            activeConnectedVid = vid;
+            var reason = playability.reason || 'This video is unavailable';
+            var oldVideo = document.getElementById('chronos-native-video');
+            if (oldVideo) oldVideo.remove();
+            var errDiv = document.getElementById('chronos-error-msg');
+            if (!errDiv) {
+              errDiv = document.createElement('div');
+              errDiv.id = 'chronos-error-msg';
+              errDiv.style.cssText = 'width:100%;min-height:360px;background:#111;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;border-radius:12px;text-align:center;padding:20px;box-sizing:border-box;z-index:9999;position:relative;';
+              container.insertBefore(errDiv, container.firstChild);
+            }
+            errDiv.innerHTML = '<div style="font-size:36px;margin-bottom:10px;">⚠️</div><div style="font-size:18px;font-weight:600;margin-bottom:6px;">' + reason + '</div><div style="font-size:13px;color:#888;">This video is restricted or unavailable on YouTube.</div>';
+            var mp = document.getElementById('movie_player');
+            if (mp) mp.style.setProperty('display', 'none', 'important');
             return;
           }
-          existing.remove();
-        }
 
-        if (window.getComputedStyle(container).position === 'static') {
-          container.style.position = 'relative';
-        }
+          var formats = data && data.streamingData && data.streamingData.formats;
+          if (formats && formats.length > 0) {
+            var best = formats.find(function(f) { return f.itag === 22 && f.url; }) ||
+                       formats.find(function(f) { return f.url; }) ||
+                       formats[0];
+            if (best && best.url) {
+              var streamUrl = best.url;
+              activeConnectedVid = vid;
 
-        // Mute / pause any underlying native video element that failed
-        var videos = container.querySelectorAll('video');
-        videos.forEach(function(v) {
-          try {
-            v.pause();
-            v.style.display = 'none';
-          } catch(e) {}
+              var oldErr = document.getElementById('chronos-error-msg');
+              if (oldErr) oldErr.remove();
+
+              var curMp = document.getElementById('movie_player');
+              if (curMp) {
+                try {
+                  if (typeof curMp.stopVideo === 'function') curMp.stopVideo();
+                  else if (typeof curMp.pauseVideo === 'function') curMp.pauseVideo();
+                } catch(e) {}
+                curMp.style.setProperty('display', 'none', 'important');
+              }
+
+              // Mute / pause any underlying native video elements from YouTube broken player
+              var ytVideos = container.querySelectorAll('video:not(#chronos-native-video)');
+              ytVideos.forEach(function(v) {
+                try {
+                  v.pause();
+                  v.style.display = 'none';
+                } catch(e) {}
+              });
+
+              var video = document.getElementById('chronos-native-video');
+              if (!video) {
+                video = document.createElement('video');
+                video.id = 'chronos-native-video';
+                video.controls = true;
+                video.autoplay = true;
+                video.playsInline = true;
+                video.style.cssText = 'width:100%;height:100%;min-height:360px;background:#000;border-radius:12px;outline:none;object-fit:contain;position:relative;z-index:9999;display:block;';
+                container.insertBefore(video, container.firstChild);
+              }
+              if (video.src !== streamUrl) {
+                video.src = streamUrl;
+                video.load();
+                video.play().catch(function() {});
+              }
+            }
+          }
+        })
+        .catch(function(err) {})
+        .finally(function() {
+          isConnecting = false;
         });
-
-        // Hide broken error screens
-        var errOverlays = container.querySelectorAll('.ytp-error, .ytp-error-screen, .ytp-cued-thumbnail-overlay');
-        errOverlays.forEach(function(el) {
-          try { el.style.display = 'none'; } catch(e) {}
-        });
-
-        var wrap = document.createElement('div');
-        wrap.id = 'chronos-clean-embed';
-        wrap.setAttribute('data-vid', vid);
-        wrap.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;z-index:9999;background:#000;display:flex;flex-direction:column;';
-
-        var topControls = document.createElement('div');
-        topControls.style.cssText = 'position:absolute;top:8px;right:12px;z-index:10001;display:flex;gap:8px;';
-
-        var theaterBtn = document.createElement('a');
-        theaterBtn.href = 'https://www.youtube.com/embed/' + vid + '?autoplay=1';
-        theaterBtn.innerText = '⤢ Full Player';
-        theaterBtn.title = 'Switch to full-window clean player';
-        theaterBtn.style.cssText = 'background:rgba(20,20,20,0.75);color:#fff;padding:5px 12px;border-radius:14px;font-size:12px;text-decoration:none;font-weight:600;font-family:-apple-system,sans-serif;backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.25);box-shadow:0 2px 8px rgba(0,0,0,0.4);';
-        topControls.appendChild(theaterBtn);
-        wrap.appendChild(topControls);
-
-        var ifr = document.createElement('iframe');
-        ifr.id = 'chronos-embed-iframe';
-        ifr.src = 'https://www.youtube.com/embed/' + vid + '?autoplay=1&playsinline=1&enablejsapi=1&rel=0';
-        ifr.style.cssText = 'width:100%;height:100%;border:none;flex:1;';
-        ifr.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share');
-        ifr.setAttribute('allowfullscreen', 'true');
-        wrap.appendChild(ifr);
-
-        container.appendChild(wrap);
       }
 
-      window.addEventListener('DOMContentLoaded', injectCleanPlayer);
-      window.addEventListener('yt-navigate-finish', injectCleanPlayer);
-      window.addEventListener('yt-page-data-updated', injectCleanPlayer);
-      window.addEventListener('popstate', injectCleanPlayer);
-      setInterval(injectCleanPlayer, 600);
+      window.addEventListener('DOMContentLoaded', checkWatchPage);
+      window.addEventListener('yt-navigate-finish', checkWatchPage);
+      window.addEventListener('yt-page-data-updated', checkWatchPage);
+      window.addEventListener('popstate', checkWatchPage);
+      setInterval(checkWatchPage, 700);
     }
   } catch(e) {}
 })();
@@ -404,50 +469,22 @@ void WebView::setFocus() {
     }
 }
 
-void WebView::updateCustomUserAgentForUrl(const std::wstring& url) {
+void WebView::updateCustomUserAgentForUrl(const std::wstring&) {
     if (!m_page) return;
-    bool isYouTube = (url.find(L"youtube.com") != std::wstring::npos || url.find(L"youtu.be") != std::wstring::npos);
-    if (isYouTube) {
-        // iPad Safari User-Agent: Delivers modern, lightweight HTML5 mobile/tablet layout without broken desktop Polymer Web Components
-        WKStringRef ua = WKStringCreateWithUTF8CString(
-            "Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
-        );
-        WKPageSetCustomUserAgent(m_page, ua);
-        WKRelease(ua);
-    } else {
-        // Desktop macOS Safari User-Agent for standard web browsing
-        WKStringRef ua = WKStringCreateWithUTF8CString(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15"
-        );
-        WKPageSetCustomUserAgent(m_page, ua);
-        WKRelease(ua);
-    }
+    // Standard macOS Safari User-Agent matching the working ChatGPT WebKit build
+    WKStringRef ua = WKStringCreateWithUTF8CString(
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15"
+    );
+    WKPageSetCustomUserAgent(m_page, ua);
+    WKRelease(ua);
 }
 
 void WebView::loadUrl(const std::wstring& targetUrl) {
     if (!m_page) return;
 
-    std::wstring routedUrl = targetUrl;
+    updateCustomUserAgentForUrl(targetUrl);
 
-    // Option B: Clean YouTube Routing
-    // Rewrite desktop YouTube to m.youtube.com for fast, lightweight UI without broken desktop Polymer Web Components
-    if (routedUrl.find(L"www.youtube.com") != std::wstring::npos || routedUrl.find(L"://youtube.com") != std::wstring::npos) {
-        if (routedUrl.find(L"/embed/") == std::wstring::npos) {
-            size_t pos = routedUrl.find(L"www.youtube.com");
-            if (pos != std::wstring::npos) {
-                routedUrl.replace(pos, 15, L"m.youtube.com");
-            } else {
-                pos = routedUrl.find(L"://youtube.com");
-                if (pos != std::wstring::npos) {
-                    routedUrl.replace(pos, 14, L"://m.youtube.com");
-                }
-            }
-        }
-    }
-
-    updateCustomUserAgentForUrl(routedUrl);
-
-    std::string utf8 = toUtf8(routedUrl);
+    std::string utf8 = toUtf8(targetUrl);
     WKURLRef urlRef = WKURLCreateWithUTF8CString(utf8.c_str());
     WKPageLoadURL(m_page, urlRef);
     WKRelease(urlRef);

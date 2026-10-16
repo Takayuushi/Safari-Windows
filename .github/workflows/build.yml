@@ -67,20 +67,3 @@ jobs:
           path: Chronos-Compass-Windows-x64.zip
           retention-days: 90
 
-      - name: Create or Update GitHub Release
-        if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: continuous
-          name: "Chronos Compass Continuous Release"
-          body: |
-            Automated release build of Chronos Compass for Windows (WebKit WinCairo).
-            
-            **Download:** `Chronos-Compass-Windows-x64.zip`
-            - Includes `Chronos.exe` and the complete WebKit WinCairo runtime.
-          files: Chronos-Compass-Windows-x64.zip
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
