@@ -76,6 +76,7 @@ public:
     bool onSetCursor();
     void onProgressTimer();
     HWND window() const { return m_hwnd; }
+    HWND activeWebViewHwnd() const;
 
 private:
     HWND m_hwnd = nullptr;

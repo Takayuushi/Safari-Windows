@@ -254,6 +254,13 @@ void Browser::selectTab(size_t index) {
     RedrawWindow(m_hwnd, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
 }
 
+HWND Browser::activeWebViewHwnd() const {
+    if (m_activeTab < m_tabs.size() && m_tabs[m_activeTab].webView) {
+        return m_tabs[m_activeTab].webView->window();
+    }
+    return nullptr;
+}
+
 void Browser::closeTab(size_t index) {
     if (index >= m_tabs.size()) return;
 

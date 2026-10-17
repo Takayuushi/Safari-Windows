@@ -205,17 +205,41 @@ bool WebView::create(HWND parent, const RECT& bounds) {
     }
 
     // 4. YouTube Watch Player Native Direct Stream Connector
-    if (window.location && window.location.hostname && window.location.hostname.indexOf('youtube.com') !== -1) {
+    if (window.location && window.location.hostname && (window.location.hostname.indexOf('youtube.com') !== -1 || window.location.hostname.indexOf('youtube-nocookie.com') !== -1 || window.location.hostname.indexOf('googleapis.com') !== -1)) {
       var currentConnectedVideoId = null;
       var isConnecting = false;
 
-      // Clean up YouTube skeleton icons and ensure full search scroll expands
+      // Clean up YouTube skeleton icons and ensure full scroll expands
       try {
         var styleEl = document.createElement('style');
         styleEl.id = 'chronos-yt-fixes';
-        styleEl.textContent = 'yt-icon { background: transparent !important; } ytd-app, #page-manager, #contents { overflow: visible !important; }';
+        styleEl.textContent = 'html, body { height: auto !important; min-height: 100vh !important; overflow-y: auto !important; overflow-x: hidden !important; } ' +
+          'ytd-app, #content, #page-manager, #primary, ytd-rich-grid-renderer, #contents { height: auto !important; overflow: visible !important; } ' +
+          '#masthead-skeleton-icons, #masthead-skeleton, #home-page-skeleton, #guide-skeleton, [id*="-skeleton"] { display: none !important; } ' +
+          'yt-icon { background: transparent !important; }';
         (document.head || document.documentElement).appendChild(styleEl);
       } catch(se) {}
+
+      function purgeSkeletons() {
+        try {
+          var skels = document.querySelectorAll('#home-page-skeleton, #masthead-skeleton, #masthead-skeleton-icons, #guide-skeleton');
+          for (var i = 0; i < skels.length; i++) {
+            skels[i].remove();
+          }
+        } catch(e) {}
+      }
+      setInterval(purgeSkeletons, 300);
+      document.addEventListener('DOMContentLoaded', purgeSkeletons);
+
+      // Unpause video on user gesture if WebKit autoplay policy requires consent
+      document.addEventListener('click', function() {
+        try {
+          var v = document.querySelector('video.video-stream.html5-main-video') || document.querySelector('video');
+          if (v && v.paused && v.src) {
+            v.play().catch(function() {});
+          }
+        } catch(e) {}
+      }, true);
 
       function getVideoId() {
         try {

@@ -132,6 +132,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
         return 0;
 
+    case WM_MOUSEWHEEL:
+    case WM_MOUSEHWHEEL: {
+        if (g_browser) {
+            HWND hChild = g_browser->activeWebViewHwnd();
+            if (hChild && IsWindow(hChild)) {
+                SendMessageW(hChild, msg, wParam, lParam);
+                return 0;
+            }
+        }
+        break;
+    }
+
     case WM_SETCURSOR: {
         if (g_browser && g_browser->onSetCursor()) {
             return TRUE;
