@@ -61,6 +61,8 @@ static void configurePreferences(WKPreferencesRef prefs) {
     WKPreferencesSetAllowsPictureInPictureMediaPlayback(prefs, true);
     WKPreferencesSetMediaPreloadingEnabled(prefs, true);
     WKPreferencesSetInvisibleMediaAutoplayPermitted(prefs, true);
+    WKPreferencesSetMediaSourceEnabled(prefs, true);
+    WKPreferencesSetSourceBufferChangeTypeEnabled(prefs, true);
 }
 
 bool WebKitHost::initialize() {
@@ -187,194 +189,145 @@ bool WebView::create(HWND parent, const RECT& bounds) {
       }
     } catch(fe) {}
 
-    // 3. Hardware-Accelerated H.264 & AAC Media Capabilities routing for Windows Media Foundation
-    // Tell media players to select standard H.264 MP4 streams.
-    // Block WebM/VP8/VP9/AV1 which Media Foundation cannot decode without specialized codecs.
-    // Do NOT return 'probably' for HLS/m3u8, avoiding unsupported dynamic byte stream errors on Windows.
+    // 3. HTML5 Media compatibility shim
     if (window.HTMLMediaElement && window.HTMLMediaElement.prototype.canPlayType) {
       var origCanPlay = window.HTMLMediaElement.prototype.canPlayType;
       window.HTMLMediaElement.prototype.canPlayType = function(type) {
         if (!type) return '';
         var l = type.toLowerCase();
-        if (l.indexOf('webm') !== -1 || l.indexOf('vp8') !== -1 || l.indexOf('vp9') !== -1 || l.indexOf('av01') !== -1 || l.indexOf('av1') !== -1) {
-          return '';
-        }
-        if (l.indexOf('avc1') !== -1 || l.indexOf('mp4a') !== -1 || l.indexOf('video/mp4') !== -1 || l.indexOf('audio/mp4') !== -1 || l.indexOf('audio/x-m4a') !== -1 || l.indexOf('audio/aac') !== -1) {
+        if (l.indexOf('avc1') !== -1 || l.indexOf('mp4a') !== -1 ||
+            l.indexOf('video/mp4') !== -1 || l.indexOf('audio/mp4') !== -1 ||
+            l.indexOf('mpegurl') !== -1 || l.indexOf('m3u8') !== -1) {
           return 'probably';
         }
         return origCanPlay.call(this, type);
       };
     }
 
-    if (navigator.mediaCapabilities && typeof navigator.mediaCapabilities.decodingInfo === 'function') {
-      var origDecodingInfo = navigator.mediaCapabilities.decodingInfo.bind(navigator.mediaCapabilities);
-      navigator.mediaCapabilities.decodingInfo = function(config) {
-        if (config && config.video && config.video.contentType) {
-          var ct = config.video.contentType.toLowerCase();
-          if (ct.indexOf('webm') !== -1 || ct.indexOf('vp8') !== -1 || ct.indexOf('vp9') !== -1 || ct.indexOf('av01') !== -1 || ct.indexOf('av1') !== -1) {
-            return Promise.resolve({ supported: false, smooth: false, powerEfficient: false });
-          }
-          if (ct.indexOf('avc1') !== -1 || ct.indexOf('mp4') !== -1) {
-            return Promise.resolve({ supported: true, smooth: true, powerEfficient: true });
-          }
-        }
-        return origDecodingInfo(config);
-      };
-    }
-
-    // 4. YouTube Native Direct Stream Player (InnerTube Android Direct 360p/720p Progressive MP4)
+    // 4. YouTube Watch Player Native Direct Stream Connector
     if (window.location && window.location.hostname && window.location.hostname.indexOf('youtube.com') !== -1) {
-      var activeConnectedVid = null;
+      var currentConnectedVideoId = null;
       var isConnecting = false;
 
-      function extractVid() {
+      // Clean up YouTube skeleton icons and ensure full search scroll expands
+      try {
+        var styleEl = document.createElement('style');
+        styleEl.id = 'chronos-yt-fixes';
+        styleEl.textContent = 'yt-icon { background: transparent !important; } ytd-app, #page-manager, #contents { overflow: visible !important; }';
+        (document.head || document.documentElement).appendChild(styleEl);
+      } catch(se) {}
+
+      function getVideoId() {
         try {
           var u = new URL(window.location.href);
-          if (u.searchParams && u.searchParams.has('v')) {
-            return u.searchParams.get('v');
-          }
-          if (u.pathname.indexOf('/shorts/') === 0) {
-            return u.pathname.substring(8).split('?')[0];
-          }
+          if (u.searchParams && u.searchParams.has('v')) return u.searchParams.get('v');
+          if (u.pathname.indexOf('/shorts/') === 0) return u.pathname.substring(8).split('?')[0];
+          if (u.pathname.indexOf('/embed/') === 0) return u.pathname.substring(7).split('?')[0];
         } catch(e) {}
-        var m = window.location.href.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
-        return m ? m[1] : null;
+        var match = window.location.search.match(/[?&]v=([^&]+)/);
+        if (match) return match[1];
+        var path = window.location.pathname;
+        if (path.indexOf('/embed/') === 0) return path.split('/')[2];
+        if (path.indexOf('/shorts/') === 0) return path.split('/')[2];
+        return null;
       }
 
-      function checkWatchPage() {
-        var vid = extractVid();
+      async function connectStream() {
+        var vid = getVideoId();
         if (!vid) {
-          var oldVideo = document.getElementById('chronos-native-video');
-          if (oldVideo) oldVideo.remove();
-          var oldErr = document.getElementById('chronos-error-msg');
-          if (oldErr) oldErr.remove();
-          var mp = document.getElementById('movie_player');
-          if (mp) mp.style.display = '';
-          activeConnectedVid = null;
+          currentConnectedVideoId = null;
           return;
         }
-
-        if (vid === activeConnectedVid || isConnecting) return;
-
-        var container = document.getElementById('player-container') ||
-                        document.getElementById('player') ||
-                        document.querySelector('.player-container') ||
-                        document.querySelector('ytm-player') ||
-                        document.getElementById('movie_player') ||
-                        document.querySelector('ytd-player');
-        if (!container) return;
-
+        if (vid === currentConnectedVideoId || isConnecting) return;
         isConnecting = true;
-        var payload = {
-          context: {
-            client: {
-              clientName: 'ANDROID',
-              clientVersion: '21.26.364',
-              androidSdkVersion: 30,
-              userAgent: 'com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip',
-              osName: 'Android',
-              osVersion: '11',
-              hl: 'en',
-              timeZone: 'UTC',
-              utcOffsetMinutes: 0
-            }
-          },
-          videoId: vid,
-          playbackContext: { contentPlaybackContext: { html5Preference: 'HTML5_PREF_WANTS' } },
-          contentCheckOk: true,
-          racyCheckOk: true
-        };
 
-        fetch('https://www.youtube.com/youtubei/v1/player', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': 'com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip',
-            'X-YouTube-Client-Name': '3',
-            'X-YouTube-Client-Version': '21.26.364'
-          },
-          body: JSON.stringify(payload)
-        })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          var playability = data && data.playabilityStatus;
-          if (playability && playability.status !== 'OK') {
-            activeConnectedVid = vid;
-            var reason = playability.reason || 'This video is unavailable';
-            var oldVideo = document.getElementById('chronos-native-video');
-            if (oldVideo) oldVideo.remove();
-            var errDiv = document.getElementById('chronos-error-msg');
-            if (!errDiv) {
-              errDiv = document.createElement('div');
-              errDiv.id = 'chronos-error-msg';
-              errDiv.style.cssText = 'width:100%;min-height:360px;background:#111;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;border-radius:12px;text-align:center;padding:20px;box-sizing:border-box;z-index:9999;position:relative;';
-              container.insertBefore(errDiv, container.firstChild);
-            }
-            errDiv.innerHTML = '<div style="font-size:36px;margin-bottom:10px;">⚠️</div><div style="font-size:18px;font-weight:600;margin-bottom:6px;">' + reason + '</div><div style="font-size:13px;color:#888;">This video is restricted or unavailable on YouTube.</div>';
-            var mp = document.getElementById('movie_player');
-            if (mp) mp.style.setProperty('display', 'none', 'important');
-            return;
-          }
+        try {
+          var payload = {
+            context: {
+              client: {
+                clientName: 'ANDROID',
+                clientVersion: '21.26.364',
+                androidSdkVersion: 30,
+                osName: 'Android',
+                osVersion: '11',
+                hl: 'en',
+                timeZone: 'UTC',
+                utcOffsetMinutes: 0
+              }
+            },
+            videoId: vid,
+            playbackContext: {
+              contentPlaybackContext: {
+                html5Preference: 'HTML5_PREF_WANTS'
+              }
+            },
+            contentCheckOk: true,
+            racyCheckOk: true
+          };
 
+          var res = await fetch('https://www.youtube.com/youtubei/v1/player', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-YouTube-Client-Name': '3',
+              'X-YouTube-Client-Version': '21.26.364'
+            },
+            body: JSON.stringify(payload)
+          });
+
+          var data = await res.json();
           var formats = data && data.streamingData && data.streamingData.formats;
           if (formats && formats.length > 0) {
             var best = formats.find(function(f) { return f.itag === 22 && f.url; }) ||
+                       formats.find(function(f) { return f.itag === 18 && f.url; }) ||
                        formats.find(function(f) { return f.url; }) ||
                        formats[0];
             if (best && best.url) {
               var streamUrl = best.url;
-              activeConnectedVid = vid;
+              currentConnectedVideoId = vid;
 
-              var oldErr = document.getElementById('chronos-error-msg');
-              if (oldErr) oldErr.remove();
-
-              var curMp = document.getElementById('movie_player');
-              if (curMp) {
-                try {
-                  if (typeof curMp.stopVideo === 'function') curMp.stopVideo();
-                  else if (typeof curMp.pauseVideo === 'function') curMp.pauseVideo();
-                } catch(e) {}
-                curMp.style.setProperty('display', 'none', 'important');
-              }
-
-              // Mute / pause any underlying native video elements from YouTube broken player
-              var ytVideos = container.querySelectorAll('video:not(#chronos-native-video)');
-              ytVideos.forEach(function(v) {
-                try {
-                  v.pause();
-                  v.style.display = 'none';
-                } catch(e) {}
-              });
-
-              var video = document.getElementById('chronos-native-video');
-              if (!video) {
-                video = document.createElement('video');
-                video.id = 'chronos-native-video';
-                video.controls = true;
-                video.autoplay = true;
-                video.playsInline = true;
-                video.style.cssText = 'width:100%;height:100%;min-height:360px;background:#000;border-radius:12px;outline:none;object-fit:contain;position:relative;z-index:9999;display:block;';
-                container.insertBefore(video, container.firstChild);
-              }
-              if (video.src !== streamUrl) {
-                video.src = streamUrl;
-                video.load();
-                video.play().catch(function() {});
-              }
+              var attachAttempts = 0;
+              var attachInterval = setInterval(function() {
+                attachAttempts++;
+                var video = document.querySelector('video.video-stream.html5-main-video') || document.querySelector('video');
+                if (video) {
+                  if (video.src !== streamUrl) {
+                    video.src = streamUrl;
+                    video.load();
+                    video.play().catch(function() {});
+                  }
+                  var spinner = document.querySelector('.ytp-spinner');
+                  if (spinner) spinner.style.setProperty('display', 'none', 'important');
+                  var errorScreen = document.querySelector('.ytp-error');
+                  if (errorScreen) errorScreen.style.setProperty('display', 'none', 'important');
+                  clearInterval(attachInterval);
+                } else if (attachAttempts > 50) {
+                  clearInterval(attachInterval);
+                }
+              }, 100);
             }
           }
-        })
-        .catch(function(err) {})
-        .finally(function() {
+        } catch (e) {
+        } finally {
           isConnecting = false;
-        });
+        }
       }
 
-      window.addEventListener('DOMContentLoaded', checkWatchPage);
-      window.addEventListener('yt-navigate-finish', checkWatchPage);
-      window.addEventListener('yt-page-data-updated', checkWatchPage);
-      window.addEventListener('popstate', checkWatchPage);
-      setInterval(checkWatchPage, 700);
+      window.addEventListener('yt-navigate-finish', function() {
+        currentConnectedVideoId = null;
+        connectStream();
+      });
+      window.addEventListener('yt-page-data-updated', connectStream);
+      window.addEventListener('popstate', function() {
+        connectStream();
+      });
+      document.addEventListener('DOMContentLoaded', connectStream);
+      setInterval(function() {
+        var vid = getVideoId();
+        if (vid && vid !== currentConnectedVideoId) {
+          connectStream();
+        }
+      }, 500);
     }
   } catch(e) {}
 })();
